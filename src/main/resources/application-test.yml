@@ -1,0 +1,31 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:doctrip_test;MODE=PostgreSQL;DB_CLOSE_DELAY=-1
+    username: sa
+    password: ""
+    driver-class-name: org.h2.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+doctrip:
+  jwt:
+    secret: test-only-secret-not-for-production-use-1234567890
+    expiry-seconds: 1800
+  cors:
+    allowed-origin: http://localhost:4200
+  otp:
+    validity-seconds: 300
+    max-attempts: 5
+    resend-cooldown-seconds: 30
+    length: 6
+
+logging:
+  level:
+    root: INFO

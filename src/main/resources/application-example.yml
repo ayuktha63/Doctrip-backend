@@ -1,0 +1,14 @@
+# Example reference for the env-var-driven configuration consumed by application.yml.
+# Copy the relevant values into real environment variables (see .env) —
+# do not put real secrets in this file or in application.yml.
+
+DB_URL: jdbc:postgresql://localhost:5432/doctrip
+DB_USERNAME: postgres
+DB_PASSWORD: postgres
+
+JWT_SECRET: replace-with-a-long-random-secret
+
+CORS_ALLOWED_ORIGIN: http://localhost:4200
+
+# Real OTP delivery (email/SMS) and Google/Apple OAuth credentials are not wired yet —
+# this slice uses ConsoleOtpDeliveryService, which prints the OTP to stdout. Added in a later commit.
