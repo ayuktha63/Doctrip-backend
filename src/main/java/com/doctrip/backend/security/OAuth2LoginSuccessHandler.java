@@ -48,9 +48,15 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
         String registrationId = extractRegistrationId(request);
         String provider = registrationId != null ? registrationId.toLowerCase() : "google";
 
-        String email = firstNonBlank(oAuth2User.getAttribute("email"));
-        String name = firstNonBlank(oAuth2User.getAttribute("name"), email);
-        String externalId = firstNonBlank(oAuth2User.getAttribute("sub"), oAuth2User.getName());
+        // getAttribute's generic return type resolves to plain Object at these call sites; an
+        // explicit <String> type witness is required so javac treats each as a single vararg
+        // element (String is not assignable to Object[]) rather than misinterpreting the sole
+        // Object-typed argument as the varargs array itself and passing it through unwrapped —
+        // that mistake throws a ClassCastException (String cannot be cast to Object[]) at runtime,
+        // only on the single-argument call (line below), never the two-argument ones.
+        String email = firstNonBlank(oAuth2User.<String>getAttribute("email"));
+        String name = firstNonBlank(oAuth2User.<String>getAttribute("name"), email);
+        String externalId = firstNonBlank(oAuth2User.<String>getAttribute("sub"), oAuth2User.getName());
 
         if (email == null || externalId == null) {
             log.warn("OAuth2 login for provider {} did not supply email/subject claims", provider);
