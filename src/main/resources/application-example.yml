@@ -14,5 +14,17 @@ REDIS_HOST: localhost
 REDIS_PORT: 6379
 REDIS_PASSWORD:
 
-# Real OTP delivery (email/SMS) and Google/Apple OAuth credentials are not wired yet —
-# this slice uses ConsoleOtpDeliveryService, which prints the OTP to stdout. Added in a later commit.
+GOOGLE_CLIENT_ID: your-google-oauth-client-id
+GOOGLE_CLIENT_SECRET: your-google-oauth-client-secret
+
+# Apple ("Sign in with Apple") needs a Services ID as client-id, and its "client secret" is not a
+# static value — it's a short-lived JWT you generate and sign with your Apple private key (Apple
+# requires re-signing at least every 6 months). Not automated yet; generate one manually for local
+# testing. See https://developer.apple.com/documentation/sign_in_with_apple/generate_and_validate_tokens
+APPLE_CLIENT_ID: your-apple-services-id
+APPLE_CLIENT_SECRET: your-generated-apple-client-secret-jwt
+
+OAUTH2_FRONTEND_REDIRECT_URI: http://localhost:4200/auth/callback
+
+# Real OTP delivery (email/SMS) is not wired yet — this slice uses ConsoleOtpDeliveryService,
+# which prints the OTP to stdout.

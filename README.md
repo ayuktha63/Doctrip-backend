@@ -11,8 +11,8 @@ Building this story part by part, commit by commit, following its FR-01..FR-10 b
 - [x] FR-03 Successful registration verification → authenticated session
 - [x] FR-04 Login (password), Redis-backed lockout after repeated failures
 - [x] FR-05 Login OTP
-- [ ] FR-06 Google OAuth
-- [ ] FR-07 Apple OAuth
+- [x] FR-06 Google OAuth
+- [x] FR-07 Apple OAuth (scaffolded — needs a real Apple Services ID + generated client-secret JWT to actually run; see `.env.example`)
 - [ ] FR-08 Session management (access/refresh tokens, expiry)
 - [ ] FR-09 Logout
 - [ ] FR-10 Cross-platform identity (implicit once the above land; verify with tests)
@@ -30,3 +30,8 @@ mvn test                 # runs against H2 + in-memory rate-limiter fakes, no ex
 OTP delivery is currently a dev stub (`ConsoleOtpDeliveryService`) that prints the code to stdout —
 real email/SMS providers are not wired up yet. OTP resend cooldowns and login-failure lockouts are
 backed by Redis (`REDIS_HOST`/`REDIS_PORT` env vars, defaults to `localhost:6379`).
+
+Google/Apple sign-in is real Spring Security OAuth2 login (`GET /oauth2/authorization/google` or
+`/apple`) — not a stub — but needs real provider credentials in `.env` to actually redirect
+anywhere; Apple's "client secret" is a JWT you generate and sign yourself (see `.env.example`).
+

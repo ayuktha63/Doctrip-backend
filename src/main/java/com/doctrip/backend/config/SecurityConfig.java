@@ -1,6 +1,8 @@
 package com.doctrip.backend.config;
 
 import com.doctrip.backend.security.JwtAuthenticationFilter;
+import com.doctrip.backend.security.OAuth2LoginFailureHandler;
+import com.doctrip.backend.security.OAuth2LoginSuccessHandler;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -19,20 +21,26 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 import java.util.List;
 
 /**
- * OAuth2 login (Google/Apple, FR-06/FR-07) is intentionally not wired yet — this covers only
- * FR-01/FR-02/FR-03 (registration + OTP + session establishment). Added in a later commit.
+ * Logout/token-revocation (FR-09) and refresh-token session management (FR-08) are still not
+ * wired — this adds FR-06/FR-07 (Google/Apple OAuth2 login) on top of FR-01..FR-05.
  */
 @Configuration
 @EnableWebSecurity
 public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
+    private final OAuth2LoginSuccessHandler oAuth2LoginSuccessHandler;
+    private final OAuth2LoginFailureHandler oAuth2LoginFailureHandler;
 
     @Value("${doctrip.cors.allowed-origin:http://localhost:4200}")
     private String allowedOrigin;
 
-    public SecurityConfig(JwtAuthenticationFilter jwtAuthenticationFilter) {
+    public SecurityConfig(JwtAuthenticationFilter jwtAuthenticationFilter,
+                           OAuth2LoginSuccessHandler oAuth2LoginSuccessHandler,
+                           OAuth2LoginFailureHandler oAuth2LoginFailureHandler) {
         this.jwtAuthenticationFilter = jwtAuthenticationFilter;
+        this.oAuth2LoginSuccessHandler = oAuth2LoginSuccessHandler;
+        this.oAuth2LoginFailureHandler = oAuth2LoginFailureHandler;
     }
 
     @Bean
@@ -49,15 +57,26 @@ public class SecurityConfig {
                                 "/api/auth/otp/**",
                                 "/api/auth/login",
                                 "/api/auth/login/otp",
+                                "/oauth2/**",
+                                "/login/oauth2/**",
                                 "/error",
                                 "/actuator/health"
                         ).permitAll()
                         .anyRequest().authenticated()
                 )
+                .oauth2Login(oauth2 -> oauth2
+                        .successHandler(oAuth2LoginSuccessHandler)
+                        .failureHandler(oAuth2LoginFailureHandler))
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }
 
+    /**
+     * Without this, Spring Security's default reaction to an unauthenticated request to a
+     * protected API route is a 302 redirect to /login (a side effect of oauth2Login() being
+     * enabled) instead of a clean 401 — which breaks JSON API clients like the Angular frontend
+     * that key off the HTTP status code.
+     */
     @Bean
     public AuthenticationEntryPoint jsonAuthenticationEntryPoint() {
         return (request, response, authException) -> {

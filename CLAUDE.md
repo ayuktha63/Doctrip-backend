@@ -29,7 +29,8 @@ src/main/java/com/doctrip/backend/
   entity/        JPA entities (Lombok-annotated)
   dto/           request/response DTOs (Lombok-annotated) — never expose entities over the API
   exception/     custom exceptions + GlobalExceptionHandler (@RestControllerAdvice)
-  security/      JwtService, JwtAuthenticationFilter, PatientPrincipal
+  security/      JwtService, JwtAuthenticationFilter, PatientPrincipal,
+                 OAuth2LoginSuccessHandler, OAuth2LoginFailureHandler
   config/        SecurityConfig, PasswordEncoderConfig, OtpProperties, LoginProperties
 ```
 
@@ -90,6 +91,41 @@ src/main/java/com/doctrip/backend/
   `ConsoleOtpDeliveryService`/`CapturingOtpDeliveryService`, they stay useful for local dev and
   tests.
 
+## OAuth2 login (FR-06 Google, FR-07 Apple)
+
+- Real Spring Security OAuth2 Client login — `spring-boot-starter-oauth2-client`, registrations
+  for `google` and `apple` in `application.yml`, credentials from env vars
+  (`GOOGLE_CLIENT_ID`/`SECRET`, `APPLE_CLIENT_ID`/`SECRET`). Not a stub: `GET
+  /oauth2/authorization/{google|apple}` does a real redirect and handshake once real credentials
+  are in `.env` — the only thing left as a manual step is generating Apple's client-secret JWT
+  (Apple's "client secret" isn't static; it's a JWT you sign yourself with your Apple private key,
+  and it expires — see the comment in `application-example.yml`). No client-secret auto-generation
+  job exists yet; add one before this goes anywhere near production.
+- `OAuth2LoginSuccessHandler` extracts `sub`/`email`/`name`/`email_verified` from the provider's
+  claims, builds an `OAuthCompleteRequest`, and calls `AuthService.completeOAuth(...)` — then
+  redirects to `doctrip.oauth2.frontend-redirect-uri` (`{frontend}/auth/callback`) with
+  `?token=...` (or `?error=...` on any failure, via `OAuth2LoginFailureHandler` for handshake-level
+  failures or the success handler's own catch block for business-logic failures like an unverified
+  email).
+- **Deliberate deviation from HRMS-backend**: there is **no public `POST /api/auth/oauth/complete`
+  endpoint**. HRMS-backend exposes exactly that, permitAll, accepting `{provider, externalId,
+  email, name}` directly from any client — which means anyone can self-declare an arbitrary
+  "verified" email and create/link an account without ever proving they own that identity through
+  a real OAuth handshake. `OAuthCompleteRequest` here is documented as internal-only (see its
+  javadoc) and only ever constructed by `OAuth2LoginSuccessHandler` from claims Spring Security
+  already validated against the provider. Do not add an HTTP endpoint that accepts this DTO's
+  fields as user input — test `AuthService.completeOAuth(...)` directly instead (see
+  `OAuthFlowTests`, which autowires `AuthService` rather than going through MockMvc for this part).
+- Account-linking safety mirrors HRMS-backend's reasoning: `completeOAuth` links to an existing
+  patient purely by email match, safe only because it also checks `emailVerified` — but only
+  rejects when the provider explicitly reports `false`. An absent claim is treated as "provider
+  doesn't tell us," not "unverified" (relevant for providers that omit the claim under some
+  conditions).
+- `ExternalIdentity` (provider + externalId, unique together, → patientId) is the link table,
+  mirroring HRMS-backend's entity of the same purpose. A brand-new OAuth identity creates a patient
+  with `status="active"` and `emailVerified=true` directly — OAuth doesn't go through the
+  registration OTP flow, since the provider has already proven the identity.
+
 ## Controller / service / repository conventions
 
 - Controllers take no `@AuthenticationPrincipal` yet in this slice (registration/OTP endpoints are
@@ -135,13 +171,13 @@ src/main/java/com/doctrip/backend/
   Default expiry: 1800 seconds — **access token only** for now; refresh-token issuance/rotation and
   expiry handling is FR-08, not yet built (see README checklist).
 - `PasswordEncoderConfig` holds the `PasswordEncoder` bean (`BCryptPasswordEncoder`) separately from
-  `SecurityConfig`, matching HRMS-backend's pattern (avoids a circular bean dependency once OAuth2
-  login is wired in a later commit).
+  `SecurityConfig`, matching HRMS-backend's pattern (avoids a circular bean dependency now that
+  `SecurityConfig` → `OAuth2LoginSuccessHandler` → `AuthService` → `PasswordEncoder` is a real
+  chain).
 - Password policy (`PasswordPolicy.isValid`): 8+ chars, upper, lower, digit, special character.
-- OAuth2 (Google/Apple, FR-06/FR-07) and logout/token-revocation (FR-09) are **not implemented
-  yet** — `SecurityConfig` deliberately has no `oauth2Login()` block and no revoked-token check in
-  `JwtAuthenticationFilter`. Both existed in HRMS-backend's SecurityConfig/JwtAuthenticationFilter
-  as a reference for how to add them here.
+- Logout/token-revocation (FR-09) is **not implemented yet** — `JwtAuthenticationFilter` has no
+  revoked-token check. HRMS-backend's `RevokedTokenRepository`/`jti`-denylist pattern is the
+  reference for how to add it here.
 - CORS is restricted to `CORS_ALLOWED_ORIGIN` (default `http://localhost:4200`), configured in
   `SecurityConfig.corsConfigurationSource()`.
 

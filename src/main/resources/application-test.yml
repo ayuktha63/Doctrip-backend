@@ -14,6 +14,27 @@ spring:
     enabled: true
     locations: classpath:db/migration
 
+  security:
+    oauth2:
+      client:
+        registration:
+          google:
+            client-id: test-google-client-id
+            client-secret: test-google-client-secret
+          apple:
+            client-id: test-apple-service-id
+            client-secret: test-apple-client-secret
+            client-authentication-method: client_secret_post
+            authorization-grant-type: authorization_code
+            redirect-uri: "{baseUrl}/login/oauth2/code/{registrationId}"
+            scope: openid, email, name
+        provider:
+          apple:
+            authorization-uri: https://appleid.apple.com/auth/authorize?response_mode=form_post
+            token-uri: https://appleid.apple.com/auth/token
+            jwk-set-uri: https://appleid.apple.com/auth/keys
+            user-name-attribute: sub
+
 doctrip:
   jwt:
     secret: test-only-secret-not-for-production-use-1234567890
@@ -25,6 +46,8 @@ doctrip:
     max-attempts: 5
     resend-cooldown-seconds: 30
     length: 6
+  oauth2:
+    frontend-redirect-uri: http://localhost:4200/auth/callback
 
 logging:
   level:
