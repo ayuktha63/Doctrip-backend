@@ -1,3 +1,6 @@
+--liquibase formatted sql
+
+--changeset doctrip:002-external-identity
 CREATE TABLE external_identity (
     id          VARCHAR(36) PRIMARY KEY,
     provider    VARCHAR(32) NOT NULL,

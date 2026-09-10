@@ -188,10 +188,22 @@ src/main/java/com/doctrip/backend/
 ## Database configuration
 
 - PostgreSQL in real environments, entirely via env vars (`DB_URL`, `DB_USERNAME`, `DB_PASSWORD`) —
-  see `.env.example`. `spring.jpa.hibernate.ddl-auto: validate` — schema changes go through Flyway
-  migrations in `src/main/resources/db/migration/`, never Hibernate auto-DDL.
+  see `.env.example`. `spring.jpa.hibernate.ddl-auto: validate` — schema changes go through
+  Liquibase changesets in `src/main/resources/db/changelog/`, never Hibernate auto-DDL.
 - Test profile (`application-test.yml`, `@ActiveProfiles("test")`) uses H2 in `MODE=PostgreSQL` so
-  the same Flyway migrations run against it.
+  the same Liquibase changelog runs against it.
+- **Liquibase, not Flyway** (switched after the initial slices, which used Flyway — HRMS-backend's
+  reference architecture used Flyway too, so this is a deliberate deviation, not a mirror of it).
+  `db.changelog-master.yaml` (`db/changelog/`) `include`s one formatted-SQL file per changeset from
+  `db/changelog/changes/` (`--liquibase formatted sql` + `--changeset doctrip:<id>` header comments)
+  — each file is the literal content of what used to be a Flyway `V<n>__*.sql` migration, so the
+  actual DDL didn't change, only the tool applying it. `spring.liquibase.change-log` points at the
+  master file; there's no `baseline-on-migrate` equivalent needed since this is a fresh schema
+  history on every environment (no pre-existing Flyway-tracked databases to reconcile).
+- New schema changes: add a new formatted-SQL file to `db/changelog/changes/` with a unique
+  `--changeset doctrip:<next-id>` line, then add an `include` entry for it at the **end** of
+  `db.changelog-master.yaml` — changeset ids must never be reused or reordered once applied
+  anywhere (Liquibase tracks applied changesets by id+author+checksum in `DATABASECHANGELOG`).
 
 ## API conventions
 
@@ -245,6 +257,6 @@ mvn package               # builds target/doctrip-backend-0.0.1-SNAPSHOT.jar
 - No hardcoded credentials, secrets, or origins anywhere in source — everything environment-driven
   with documented defaults in `.env.example` / `application-example.yml`.
 - No Hibernate auto-DDL in real profiles (`ddl-auto: validate` only) — schema changes always go
-  through a new Flyway migration file.
+  through a new Liquibase changeset file.
 - Never persist, log, or return the plaintext OTP value anywhere outside `OtpService.issue`'s local
   variable and its call into `OtpDeliveryService.send(...)`.

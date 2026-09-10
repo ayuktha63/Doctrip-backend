@@ -1,3 +1,6 @@
+--liquibase formatted sql
+
+--changeset doctrip:001-init
 CREATE TABLE patient (
     id               VARCHAR(36) PRIMARY KEY,
     full_name        VARCHAR(255) NOT NULL,

@@ -1,3 +1,6 @@
+--liquibase formatted sql
+
+--changeset doctrip:003-refresh-and-revoked-tokens
 CREATE TABLE refresh_token (
     id         VARCHAR(36) PRIMARY KEY,
     patient_id VARCHAR(36) NOT NULL,
