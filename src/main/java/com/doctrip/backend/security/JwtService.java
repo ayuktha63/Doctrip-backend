@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.security.Key;
+import java.time.Instant;
 import java.util.Date;
 import java.util.UUID;
 
@@ -49,6 +50,15 @@ public class JwtService {
 
     public String extractPatientId(String token) {
         return parseClaims(token).getSubject();
+    }
+
+    /** The JWT ID (jti) claim — used as the revocation key so a logged-out access token can be denylisted. */
+    public String extractJti(String token) {
+        return parseClaims(token).getId();
+    }
+
+    public Instant extractExpiry(String token) {
+        return parseClaims(token).getExpiration().toInstant();
     }
 
     public boolean isValid(String token) {

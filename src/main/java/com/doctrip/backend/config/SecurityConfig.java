@@ -57,6 +57,7 @@ public class SecurityConfig {
                                 "/api/auth/otp/**",
                                 "/api/auth/login",
                                 "/api/auth/login/otp",
+                                "/api/auth/token/refresh",
                                 "/oauth2/**",
                                 "/login/oauth2/**",
                                 "/error",

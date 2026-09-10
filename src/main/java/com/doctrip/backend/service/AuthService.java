@@ -8,6 +8,7 @@ import com.doctrip.backend.dto.OtpChallengeResponse;
 import com.doctrip.backend.dto.OtpResendRequest;
 import com.doctrip.backend.dto.OtpVerifyRequest;
 import com.doctrip.backend.dto.PatientResponse;
+import com.doctrip.backend.dto.RefreshTokenRequest;
 import com.doctrip.backend.dto.RegisterRequest;
 import com.doctrip.backend.entity.ExternalIdentity;
 import com.doctrip.backend.entity.Patient;
@@ -16,8 +17,10 @@ import com.doctrip.backend.exception.ConflictException;
 import com.doctrip.backend.exception.NotFoundException;
 import com.doctrip.backend.exception.TooManyRequestsException;
 import com.doctrip.backend.exception.UnauthorizedException;
+import com.doctrip.backend.entity.RevokedToken;
 import com.doctrip.backend.repository.ExternalIdentityRepository;
 import com.doctrip.backend.repository.PatientRepository;
+import com.doctrip.backend.repository.RevokedTokenRepository;
 import com.doctrip.backend.security.JwtService;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -37,6 +40,8 @@ public class AuthService {
     private final OtpService otpService;
     private final AuditService auditService;
     private final JwtService jwtService;
+    private final RefreshTokenService refreshTokenService;
+    private final RevokedTokenRepository revokedTokenRepository;
     private final LoginRateLimiter loginRateLimiter;
 
     public AuthService(PatientRepository patientRepository,
@@ -45,6 +50,8 @@ public class AuthService {
                         OtpService otpService,
                         AuditService auditService,
                         JwtService jwtService,
+                        RefreshTokenService refreshTokenService,
+                        RevokedTokenRepository revokedTokenRepository,
                         LoginRateLimiter loginRateLimiter) {
         this.patientRepository = patientRepository;
         this.externalIdentityRepository = externalIdentityRepository;
@@ -52,7 +59,16 @@ public class AuthService {
         this.otpService = otpService;
         this.auditService = auditService;
         this.jwtService = jwtService;
+        this.refreshTokenService = refreshTokenService;
+        this.revokedTokenRepository = revokedTokenRepository;
         this.loginRateLimiter = loginRateLimiter;
+    }
+
+    /** FR-08 — issues the access+refresh token pair every authentication path returns. */
+    private AuthResponse issueSession(Patient patient) {
+        String accessToken = jwtService.generateToken(patient.getId());
+        String refreshToken = refreshTokenService.issue(patient.getId());
+        return new AuthResponse(accessToken, refreshToken, PatientResponse.from(patient));
     }
 
     /** FR-01 — validates, prevents duplicate identities, creates a pending-verification patient, sends the registration OTP. */
@@ -106,8 +122,7 @@ public class AuthService {
             auditService.record(patient.getId(), "login_succeeded_otp", "EMAIL");
         }
 
-        String token = jwtService.generateToken(patient.getId());
-        return new AuthResponse(token, PatientResponse.from(patient));
+        return issueSession(patient);
     }
 
     /** FR-02/FR-05 resend, subject to the cooldown/rate-limit rules enforced inside OtpService. */
@@ -139,8 +154,7 @@ public class AuthService {
 
         loginRateLimiter.reset(identifier);
         auditService.record(patient.getId(), "login_succeeded", "PASSWORD");
-        String token = jwtService.generateToken(patient.getId());
-        return new AuthResponse(token, PatientResponse.from(patient));
+        return issueSession(patient);
     }
 
     /** FR-05 — issues a login OTP for a patient identified by email or mobile. */
@@ -205,7 +219,38 @@ public class AuthService {
         }
 
         auditService.record(patient.getId(), "oauth_login_succeeded", provider.toUpperCase());
-        String token = jwtService.generateToken(patient.getId());
-        return new AuthResponse(token, PatientResponse.from(patient));
+        return issueSession(patient);
+    }
+
+    /**
+     * FR-08 — exchanges a still-valid refresh token for a new access token, rotating the refresh
+     * token in the same call. Rejects expired/invalid/already-used (revoked) refresh tokens,
+     * requiring the patient to log in again — see RefreshTokenService.verifyAndRotate.
+     */
+    @Transactional
+    public AuthResponse refresh(RefreshTokenRequest request) {
+        RefreshTokenService.Rotated rotated = refreshTokenService.verifyAndRotate(request.getRefreshToken());
+        Patient patient = patientRepository.findById(rotated.patientId())
+                .orElseThrow(() -> new UnauthorizedException("Invalid session. Please log in again."));
+
+        String accessToken = jwtService.generateToken(patient.getId());
+        auditService.record(patient.getId(), "token_refreshed", null);
+        return new AuthResponse(accessToken, rotated.newRawToken(), PatientResponse.from(patient));
+    }
+
+    /**
+     * FR-09 — terminates the session: the presented access token is denylisted by its jti (so it
+     * stops working immediately, before its natural expiry) and every refresh token for the
+     * patient is revoked, so neither can be used to regain access without logging in again.
+     */
+    @Transactional
+    public void logout(String patientId, String accessToken) {
+        String jti = jwtService.extractJti(accessToken);
+        revokedTokenRepository.save(RevokedToken.builder()
+                .jti(jti)
+                .expiresAt(jwtService.extractExpiry(accessToken))
+                .build());
+        refreshTokenService.revokeAllForPatient(patientId);
+        auditService.record(patientId, "logout", null);
     }
 }

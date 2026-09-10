@@ -126,11 +126,47 @@ src/main/java/com/doctrip/backend/
   with `status="active"` and `emailVerified=true` directly — OAuth doesn't go through the
   registration OTP flow, since the provider has already proven the identity.
 
+## Session management — access/refresh tokens (FR-08) and logout (FR-09)
+
+- **Access token**: the existing short-lived JWT (`JwtService`, 1800s default,
+  `doctrip.jwt.expiry-seconds`), stateless, carries a `jti`.
+- **Refresh token**: `RefreshToken` entity — an opaque high-entropy random value (32 bytes,
+  URL-safe base64), **not** a JWT, because it must be revocable server-side. Only its SHA-256 hash
+  is stored (`TokenHasher.sha256Hex`, `service/TokenHasher.java`) — SHA-256, not BCrypt, is
+  deliberate here: unlike a password or OTP, a refresh token has no guessable keyspace to slow
+  down, so a fast deterministic hash is correct and lets lookup use a plain indexed equality query
+  instead of iterating candidates. Default lifetime 30 days (`doctrip.jwt.refresh-expiry-seconds`).
+- **Rotation on every use**: `RefreshTokenService.verifyAndRotate(...)` revokes the presented
+  refresh token and issues a new one in the same call — every authenticated response
+  (`AuthResponse`) carries both `accessToken` and `refreshToken`, and `POST
+  /api/auth/token/refresh` is how a client exchanges a still-valid refresh token for a new access
+  token. Reusing an already-rotated (or expired, or never-existed) refresh token is a 401 — this is
+  the "invalid/expired refresh token" rejection FR-08/BR-12 call for, and it also catches stolen
+  refresh-token reuse (a legitimate client's next real refresh will fail with the same 401, a
+  detectable sign of token theft — no additional handling wired up for that signal yet).
+- `AuthService.issueSession(Patient)` is the single place that mints both tokens — every
+  authentication path (`verifyOtp` for register/login-OTP, `login`, `completeOAuth`) calls it
+  rather than constructing `AuthResponse` by hand. Keep it that way; don't reintroduce a
+  single-token `new AuthResponse(token, ...)` call site.
+- **Logout** (`POST /api/auth/logout`, requires a valid access token): denylists that specific
+  access token by its `jti` (`RevokedToken` entity/table, checked in
+  `JwtAuthenticationFilter.isRevoked(...)` on every request — same pattern as HRMS-backend's
+  `RevokedTokenRepository`) AND revokes every refresh token for the patient
+  (`RefreshTokenService.revokeAllForPatient`), so neither the current access token nor any
+  outstanding refresh token can be used afterward. `revoked_token` rows are never pruned — same
+  known gap as HRMS-backend, low urgency (expired-but-listed rows only cost a lookup, not
+  correctness), but a scheduled cleanup would be a reasonable follow-up.
+- FR-08's "handle expired/invalid refresh tokens" and FR-09's "require re-authentication when the
+  session can no longer be refreshed" are both just: `/api/auth/token/refresh` returns 401, and the
+  frontend's job is to send the patient back through login when that happens — no server-side
+  "session" object beyond the `refresh_token` table rows.
+
 ## Controller / service / repository conventions
 
-- Controllers take no `@AuthenticationPrincipal` yet in this slice (registration/OTP endpoints are
-  all pre-auth) — `PatientPrincipal` exists for `JwtAuthenticationFilter` to populate once
-  protected endpoints exist.
+- Most auth endpoints are pre-auth (registration/OTP/login) and take no principal; `POST
+  /api/auth/logout` is the first protected endpoint and uses `@AuthenticationPrincipal
+  PatientPrincipal` (populated by `JwtAuthenticationFilter`) — that's the pattern to follow for any
+  future endpoint that needs "the current patient."
 - One service per resource area (`AuthService`, `OtpService`, `AuditService`); services throw the
   custom exceptions in `exception/` (`BadRequestException`, `ConflictException`, `NotFoundException`,
   `TooManyRequestsException`, `UnauthorizedException`) rather than returning error codes —
@@ -153,31 +189,32 @@ src/main/java/com/doctrip/backend/
 - Error shape (`exception/ApiError.java`): `{status, error, message, path, timestamp}`.
 - `POST /api/auth/register` → 201 `{patientId, otpChannel, otpTarget, otpValiditySeconds}`
   (`OtpChallengeResponse` — shared shape with the login-OTP endpoint below)
-- `POST /api/auth/otp/verify` → 200 `{accessToken, patient}` (completes registration when
-  `purpose=REGISTER`; just authenticates when `purpose=LOGIN`) — 400 on wrong/expired/already-used
-  code, 429 once the attempt limit is hit
+- `POST /api/auth/otp/verify` → 200 `AuthResponse {accessToken, refreshToken, patient}` (completes
+  registration when `purpose=REGISTER`; just authenticates when `purpose=LOGIN`) — 400 on
+  wrong/expired/already-used code, 429 once the attempt limit is hit
 - `POST /api/auth/otp/resend` → 204, 429 inside the resend cooldown
-- `POST /api/auth/login` → 200 `{accessToken, patient}`; 401 on wrong credentials or an unknown
-  identifier (same status for both — don't leak which one was wrong); 429 once
-  `LoginRateLimiter` locks the identifier out
+- `POST /api/auth/login` → 200 `AuthResponse`; 401 on wrong credentials or an unknown identifier
+  (same status for both — don't leak which one was wrong); 429 once `LoginRateLimiter` locks the
+  identifier out
 - `POST /api/auth/login/otp` → 200 `OtpChallengeResponse`; 404 if no account matches
   `loginId` (email or mobile) — verify with the same `/api/auth/otp/verify` endpoint,
   `purpose=LOGIN`
+- `POST /api/auth/token/refresh` → 200 `{accessToken, refreshToken, patient}`; 401 on an
+  invalid/expired/already-used refresh token
+- `POST /api/auth/logout` → 204; requires `Authorization: Bearer <accessToken>` (the only
+  protected auth endpoint so far)
 
 ## Security requirements
 
 - JWT bearer auth (`Authorization: Bearer <token>`), stateless sessions
   (`SessionCreationPolicy.STATELESS`), issued/validated by `JwtService` using `JWT_SECRET` from env.
-  Default expiry: 1800 seconds — **access token only** for now; refresh-token issuance/rotation and
-  expiry handling is FR-08, not yet built (see README checklist).
+  Default access-token expiry: 1800 seconds. See the "Session management" section above for the
+  refresh-token/logout design (FR-08/FR-09) — both are implemented, not just scaffolded.
 - `PasswordEncoderConfig` holds the `PasswordEncoder` bean (`BCryptPasswordEncoder`) separately from
   `SecurityConfig`, matching HRMS-backend's pattern (avoids a circular bean dependency now that
   `SecurityConfig` → `OAuth2LoginSuccessHandler` → `AuthService` → `PasswordEncoder` is a real
   chain).
 - Password policy (`PasswordPolicy.isValid`): 8+ chars, upper, lower, digit, special character.
-- Logout/token-revocation (FR-09) is **not implemented yet** — `JwtAuthenticationFilter` has no
-  revoked-token check. HRMS-backend's `RevokedTokenRepository`/`jti`-denylist pattern is the
-  reference for how to add it here.
 - CORS is restricted to `CORS_ALLOWED_ORIGIN` (default `http://localhost:4200`), configured in
   `SecurityConfig.corsConfigurationSource()`.
 
