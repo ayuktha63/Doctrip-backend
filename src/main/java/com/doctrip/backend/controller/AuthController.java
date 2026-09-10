@@ -1,10 +1,12 @@
 package com.doctrip.backend.controller;
 
 import com.doctrip.backend.dto.AuthResponse;
+import com.doctrip.backend.dto.LoginOtpRequest;
+import com.doctrip.backend.dto.LoginRequest;
+import com.doctrip.backend.dto.OtpChallengeResponse;
 import com.doctrip.backend.dto.OtpResendRequest;
 import com.doctrip.backend.dto.OtpVerifyRequest;
 import com.doctrip.backend.dto.RegisterRequest;
-import com.doctrip.backend.dto.RegisterResponse;
 import com.doctrip.backend.service.AuthService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -23,7 +25,7 @@ public class AuthController {
     }
 
     @PostMapping("/api/auth/register")
-    public ResponseEntity<RegisterResponse> register(@Valid @RequestBody RegisterRequest request) {
+    public ResponseEntity<OtpChallengeResponse> register(@Valid @RequestBody RegisterRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED).body(authService.register(request));
     }
 
@@ -36,5 +38,15 @@ public class AuthController {
     public ResponseEntity<Void> resendOtp(@Valid @RequestBody OtpResendRequest request) {
         authService.resendOtp(request);
         return ResponseEntity.noContent().build();
+    }
+
+    @PostMapping("/api/auth/login")
+    public ResponseEntity<AuthResponse> login(@Valid @RequestBody LoginRequest request) {
+        return ResponseEntity.ok(authService.login(request));
+    }
+
+    @PostMapping("/api/auth/login/otp")
+    public ResponseEntity<OtpChallengeResponse> requestLoginOtp(@Valid @RequestBody LoginOtpRequest request) {
+        return ResponseEntity.ok(authService.requestLoginOtp(request));
     }
 }

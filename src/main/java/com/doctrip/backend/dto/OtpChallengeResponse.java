@@ -5,12 +5,12 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
-/** Returned after FR-01 registration is accepted — OTP verification (FR-02/FR-03) is still pending. */
+/** Returned whenever an OTP has just been issued (registration FR-01/FR-02, or login FR-05) and is pending verification. */
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
-public class RegisterResponse {
+public class OtpChallengeResponse {
     private String patientId;
     private String otpChannel;
     private String otpTarget;

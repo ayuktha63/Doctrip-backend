@@ -9,8 +9,8 @@ Building this story part by part, commit by commit, following its FR-01..FR-10 b
 - [x] FR-01 Patient registration
 - [x] FR-02 Registration OTP (generate/send/verify/expire/resend/attempt-limit)
 - [x] FR-03 Successful registration verification → authenticated session
-- [ ] FR-04 Login (password)
-- [ ] FR-05 Login OTP
+- [x] FR-04 Login (password), Redis-backed lockout after repeated failures
+- [x] FR-05 Login OTP
 - [ ] FR-06 Google OAuth
 - [ ] FR-07 Apple OAuth
 - [ ] FR-08 Session management (access/refresh tokens, expiry)
@@ -23,9 +23,10 @@ See `CLAUDE.md` for architecture and conventions.
 
 ```bash
 cp .env.example .env   # then edit with real values, or use your shell/IDE's env support
-mvn spring-boot:run     # http://localhost:8081, requires Postgres reachable at DB_URL
-mvn test                 # runs against H2, no external DB needed
+mvn spring-boot:run     # http://localhost:8081, requires Postgres + Redis reachable
+mvn test                 # runs against H2 + in-memory rate-limiter fakes, no external services needed
 ```
 
 OTP delivery is currently a dev stub (`ConsoleOtpDeliveryService`) that prints the code to stdout —
-real email/SMS providers are not wired up yet.
+real email/SMS providers are not wired up yet. OTP resend cooldowns and login-failure lockouts are
+backed by Redis (`REDIS_HOST`/`REDIS_PORT` env vars, defaults to `localhost:6379`).

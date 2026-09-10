@@ -10,5 +10,9 @@ JWT_SECRET: replace-with-a-long-random-secret
 
 CORS_ALLOWED_ORIGIN: http://localhost:4200
 
+REDIS_HOST: localhost
+REDIS_PORT: 6379
+REDIS_PASSWORD:
+
 # Real OTP delivery (email/SMS) and Google/Apple OAuth credentials are not wired yet —
 # this slice uses ConsoleOtpDeliveryService, which prints the OTP to stdout. Added in a later commit.

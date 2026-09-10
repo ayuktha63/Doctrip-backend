@@ -13,7 +13,6 @@ import java.security.SecureRandom;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
-import java.util.Optional;
 
 /**
  * Generates, delivers, and verifies OTP challenges (FR-02/FR-05). The plaintext OTP is handed to
@@ -31,32 +30,31 @@ public class OtpService {
     private final OtpProperties otpProperties;
     private final AuditService auditService;
     private final OtpAttemptRecorder otpAttemptRecorder;
+    private final OtpRateLimiter otpRateLimiter;
 
     public OtpService(OtpChallengeRepository otpChallengeRepository,
                        OtpDeliveryService otpDeliveryService,
                        PasswordEncoder passwordEncoder,
                        OtpProperties otpProperties,
                        AuditService auditService,
-                       OtpAttemptRecorder otpAttemptRecorder) {
+                       OtpAttemptRecorder otpAttemptRecorder,
+                       OtpRateLimiter otpRateLimiter) {
         this.otpChallengeRepository = otpChallengeRepository;
         this.otpDeliveryService = otpDeliveryService;
         this.passwordEncoder = passwordEncoder;
         this.otpProperties = otpProperties;
         this.auditService = auditService;
         this.otpAttemptRecorder = otpAttemptRecorder;
+        this.otpRateLimiter = otpRateLimiter;
     }
 
     @Transactional
     public OtpChallenge issue(String patientId, String purpose, String channel, String target) {
-        Optional<OtpChallenge> last = otpChallengeRepository
-                .findTopByPatientIdAndPurposeOrderByCreatedAtDesc(patientId, purpose);
-        last.ifPresent(previous -> {
-            if (!previous.isConsumed() && !previous.isInvalidated()
-                    && previous.getCreatedAt().plusSeconds(otpProperties.getResendCooldownSeconds()).isAfter(Instant.now())) {
-                throw new TooManyRequestsException(
-                        "Please wait before requesting another code.");
-            }
-        });
+        // BR-06/AC-08 — Redis-backed cooldown (SET NX EX), not a DB timestamp comparison: atomic
+        // across concurrent requests and doesn't need its own DB row to derive state from.
+        if (!otpRateLimiter.tryAcquire(patientId + ":" + purpose, otpProperties.getResendCooldownSeconds())) {
+            throw new TooManyRequestsException("Please wait before requesting another code.");
+        }
 
         // BR-07: a newly issued OTP invalidates any previously issued, still-live OTP for the same transaction.
         List<OtpChallenge> live = otpChallengeRepository
