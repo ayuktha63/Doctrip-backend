@@ -9,9 +9,9 @@ two deliberate deviations: **this repo uses Lombok** for entities/DTOs (`@Getter
 ## Modules
 
 - **Story 1 — Patient Registration, Login & Account Management**: `auth` (registration, OTP,
-  login, OAuth, sessions, logout). Built commit-by-commit against the FR-01..FR-10 breakdown — see
-  `README.md` for what's landed so far. Don't jump ahead to a later FR until earlier ones are
-  committed and tested.
+  login, OAuth, sessions, logout) + `patient` (`GET /api/patients/me`). Backend is now complete
+  against the story's FR-01..FR-10 breakdown — see `README.md`'s checklist and this file's section
+  headings below for what each FR actually built. `Doctrip-frontend` has not been started yet.
 
 ## Java & Spring Boot versions
 
@@ -201,8 +201,10 @@ src/main/java/com/doctrip/backend/
   `purpose=LOGIN`
 - `POST /api/auth/token/refresh` → 200 `{accessToken, refreshToken, patient}`; 401 on an
   invalid/expired/already-used refresh token
-- `POST /api/auth/logout` → 204; requires `Authorization: Bearer <accessToken>` (the only
-  protected auth endpoint so far)
+- `POST /api/auth/logout` → 204; requires `Authorization: Bearer <accessToken>`
+- `GET /api/patients/me` → 200 `PatientResponse`; requires `Authorization: Bearer <accessToken>` —
+  FR-10's "same identity regardless of channel" made concrete: any valid access token, from any
+  login path, resolves to the same patient row here (see `CrossPlatformIdentityTests`)
 
 ## Security requirements
 

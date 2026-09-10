@@ -15,7 +15,10 @@ Building this story part by part, commit by commit, following its FR-01..FR-10 b
 - [x] FR-07 Apple OAuth (scaffolded — needs a real Apple Services ID + generated client-secret JWT to actually run; see `.env.example`)
 - [x] FR-08 Session management (rotating refresh tokens, access-token expiry)
 - [x] FR-09 Logout (access-token denylist + refresh-token revocation)
-- [ ] FR-10 Cross-platform identity (implicit once the above land; verify with tests)
+- [x] FR-10 Cross-platform identity (one Patient identity/JWT regardless of channel; see `GET /api/patients/me` and `CrossPlatformIdentityTests`)
+
+Story 1's backend is feature-complete against its FR breakdown. `Doctrip-frontend` (Angular, same
+stack as `HRMS-frontend`) hasn't been started yet.
 
 See `CLAUDE.md` for architecture and conventions.
 
