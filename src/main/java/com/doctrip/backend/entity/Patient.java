@@ -61,6 +61,10 @@ public class Patient {
     @Builder.Default
     private List<String> authProviders = new ArrayList<>();
 
+    /** When the patient accepted the Terms of Service/Privacy Policy at registration; null for OAuth-only accounts. */
+    @Column
+    private Instant termsAcceptedAt;
+
     @Column(nullable = false)
     @Builder.Default
     private Instant createdAt = Instant.now();

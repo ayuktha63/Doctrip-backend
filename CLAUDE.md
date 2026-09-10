@@ -11,7 +11,15 @@ two deliberate deviations: **this repo uses Lombok** for entities/DTOs (`@Getter
 - **Story 1 — Patient Registration, Login & Account Management**: `auth` (registration, OTP,
   login, OAuth, sessions, logout) + `patient` (`GET /api/patients/me`). Backend is now complete
   against the story's FR-01..FR-10 breakdown — see `README.md`'s checklist and this file's section
-  headings below for what each FR actually built. `Doctrip-frontend` has not been started yet.
+  headings below for what each FR actually built.
+- **`RegisterRequest.mobile`** is validated as exactly 10 digits (`^[0-9]{10}$`, tightened from an
+  earlier 7–15-digit range) and **`RegisterRequest.agreeToTerms`** (`@AssertTrue`) is required —
+  both changed to match `Doctrip-frontend`'s registration form exactly (the reference mockup,
+  `doctrip-web-panels 2.html`'s `PatientPanel.dc.html` artboard, validates a strict 10-digit mobile
+  number and requires a Terms of Service checkbox before submit). `Patient.termsAcceptedAt` records
+  when consent was given; `AuthService.register` sets it to `Instant.now()`. If the frontend's
+  mobile format or a required-consent field ever changes, update this contract in both repos
+  together — see `Doctrip-frontend`'s `CLAUDE.md` for the other side of this mapping.
 
 ## Java & Spring Boot versions
 

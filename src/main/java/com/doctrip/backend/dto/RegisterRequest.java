@@ -1,5 +1,6 @@
 package com.doctrip.backend.dto;
 
+import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
@@ -22,9 +23,13 @@ public class RegisterRequest {
     private String email;
 
     @NotBlank(message = "Mobile number is required.")
-    @Pattern(regexp = "^[0-9]{7,15}$", message = "Enter a valid mobile number.")
+    @Pattern(regexp = "^[0-9]{10}$", message = "Enter a 10-digit mobile number.")
     private String mobile;
 
     @NotBlank(message = "Password is required.")
     private String password;
+
+    /** Frontend requires accepting Terms of Service/Privacy Policy before submitting registration. */
+    @AssertTrue(message = "Please accept the Terms of Service to continue.")
+    private boolean agreeToTerms;
 }

@@ -50,6 +50,7 @@ class CrossPlatformIdentityTests {
         req.setEmail(email);
         req.setMobile(mobile);
         req.setPassword(password);
+        req.setAgreeToTerms(true);
 
         String registerBody = mockMvc.perform(post("/api/auth/register")
                         .contentType("application/json")

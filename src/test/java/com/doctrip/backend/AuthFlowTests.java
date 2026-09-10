@@ -36,6 +36,7 @@ class AuthFlowTests {
         req.setEmail(email);
         req.setMobile(mobile);
         req.setPassword("Str0ng!Pass1");
+        req.setAgreeToTerms(true);
         return req;
     }
 

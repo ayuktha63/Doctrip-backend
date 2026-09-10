@@ -37,6 +37,7 @@ class LoginFlowTests {
         req.setEmail(email);
         req.setMobile(mobile);
         req.setPassword("Str0ng!Pass1");
+        req.setAgreeToTerms(true);
 
         String responseBody = mockMvc.perform(post("/api/auth/register")
                         .contentType("application/json")

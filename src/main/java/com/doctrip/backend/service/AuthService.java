@@ -26,6 +26,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.Optional;
 
 @Service
@@ -92,6 +93,7 @@ public class AuthService {
                 .mobile(request.getMobile())
                 .passwordHash(passwordEncoder.encode(request.getPassword()))
                 .status("pending_verification")
+                .termsAcceptedAt(Instant.now())
                 .build();
         patient = patientRepository.save(patient);
         auditService.record(patient.getId(), "registration_created", "EMAIL");
