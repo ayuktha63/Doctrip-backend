@@ -112,9 +112,12 @@ src/main/java/com/doctrip/backend/
 - `OAuth2LoginSuccessHandler` extracts `sub`/`email`/`name`/`email_verified` from the provider's
   claims, builds an `OAuthCompleteRequest`, and calls `AuthService.completeOAuth(...)` — then
   redirects to `doctrip.oauth2.frontend-redirect-uri` (`{frontend}/auth/callback`) with
-  `?token=...` (or `?error=...` on any failure, via `OAuth2LoginFailureHandler` for handshake-level
-  failures or the success handler's own catch block for business-logic failures like an unverified
-  email).
+  `?token=...&refreshToken=...` (or `?error=...` on any failure, via `OAuth2LoginFailureHandler`
+  for handshake-level failures or the success handler's own catch block for business-logic
+  failures like an unverified email) — both tokens, matching every other auth path's `AuthResponse`
+  shape (FR-08). An earlier version of this redirect only carried `token`, silently dropping the
+  refresh token for OAuth logins alone; fixed once `Doctrip-frontend`'s OAuth callback route needed
+  to consume both.
 - **Deliberate deviation from HRMS-backend**: there is **no public `POST /api/auth/oauth/complete`
   endpoint**. HRMS-backend exposes exactly that, permitAll, accepting `{provider, externalId,
   email, name}` directly from any client — which means anyone can self-declare an arbitrary

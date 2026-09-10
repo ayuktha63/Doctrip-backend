@@ -70,8 +70,9 @@ public class OAuth2LoginSuccessHandler implements AuthenticationSuccessHandler {
 
         try {
             AuthResponse authResponse = authService.completeOAuth(req);
-            String redirect = frontendRedirectUri + "?token=" +
-                    URLEncoder.encode(authResponse.getAccessToken(), StandardCharsets.UTF_8);
+            String redirect = frontendRedirectUri
+                    + "?token=" + URLEncoder.encode(authResponse.getAccessToken(), StandardCharsets.UTF_8)
+                    + "&refreshToken=" + URLEncoder.encode(authResponse.getRefreshToken(), StandardCharsets.UTF_8);
             response.sendRedirect(redirect);
         } catch (Exception e) {
             log.warn("OAuth2 login completion failed for provider {}: {}", provider, e.getMessage());
