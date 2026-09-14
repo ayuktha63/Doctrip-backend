@@ -14,6 +14,8 @@ import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
+import com.doctrip.backend.common.ResourceNotFoundException;
+
 @WebMvcTest(TreatmentPackageController.class)
 class TreatmentPackageControllerTest {
 
@@ -24,7 +26,7 @@ class TreatmentPackageControllerTest {
     private TreatmentPackageService treatmentPackageService;
 
     @Test
-    void returnsApprovedActivePackagesWhenAvailable() throws Exception {
+    void returnsApprovedPackagesWhenAvailable() throws Exception {
         given(treatmentPackageService.getPubliclyDiscoverablePackages())
                 .willReturn(List.of(new TreatmentPackageSummaryDto(1L, "Knee Replacement", "Full package")));
 
@@ -41,5 +43,25 @@ class TreatmentPackageControllerTest {
         mockMvc.perform(get("/api/public/treatment-packages"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(0)));
+    }
+
+    @Test
+    void returnsPackageDetailsWhenApprovedPackageExists() throws Exception {
+        given(treatmentPackageService.getPubliclyDiscoverablePackageById(1L))
+                .willReturn(new TreatmentPackageSummaryDto(1L, "Knee Replacement", "Full package"));
+
+        mockMvc.perform(get("/api/public/treatment-packages/1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(1))
+                .andExpect(jsonPath("$.name").value("Knee Replacement"));
+    }
+
+    @Test
+    void returnsNotFoundWhenPackageDoesNotExistOrIsNotApproved() throws Exception {
+        given(treatmentPackageService.getPubliclyDiscoverablePackageById(99L))
+                .willThrow(new ResourceNotFoundException("Treatment package not found"));
+
+        mockMvc.perform(get("/api/public/treatment-packages/99"))
+                .andExpect(status().isNotFound());
     }
 }
