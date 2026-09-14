@@ -3,7 +3,9 @@ package com.doctrip.backend.hospital;
 import java.util.List;
 
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -17,7 +19,15 @@ public class HospitalController {
     }
 
     @GetMapping
-    public List<HospitalSummaryDto> getHospitals() {
-        return hospitalService.getPubliclyDiscoverableHospitals();
+    public List<HospitalSummaryDto> getHospitals(@RequestParam(required = false) String name) {
+        if (name == null || name.isBlank()) {
+            return hospitalService.getPubliclyDiscoverableHospitals();
+        }
+        return hospitalService.searchPubliclyDiscoverableHospitals(name);
+    }
+
+    @GetMapping("/{id}")
+    public HospitalSummaryDto getHospitalById(@PathVariable Long id) {
+        return hospitalService.getPubliclyDiscoverableHospitalById(id);
     }
 }

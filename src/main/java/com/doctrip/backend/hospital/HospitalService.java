@@ -4,6 +4,8 @@ import java.util.List;
 
 import org.springframework.stereotype.Service;
 
+import com.doctrip.backend.common.ResourceNotFoundException;
+
 @Service
 public class HospitalService {
 
@@ -18,5 +20,18 @@ public class HospitalService {
                 .stream()
                 .map(HospitalSummaryDto::from)
                 .toList();
+    }
+
+    public List<HospitalSummaryDto> searchPubliclyDiscoverableHospitals(String name) {
+        return hospitalRepository.findByApprovedTrueAndNameContainingIgnoreCase(name)
+                .stream()
+                .map(HospitalSummaryDto::from)
+                .toList();
+    }
+
+    public HospitalSummaryDto getPubliclyDiscoverableHospitalById(Long id) {
+        return hospitalRepository.findByIdAndApprovedTrue(id)
+                .map(HospitalSummaryDto::from)
+                .orElseThrow(() -> new ResourceNotFoundException("Hospital not found"));
     }
 }
