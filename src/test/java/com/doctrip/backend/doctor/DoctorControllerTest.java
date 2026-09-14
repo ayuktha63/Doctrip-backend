@@ -14,6 +14,8 @@ import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
+import com.doctrip.backend.common.ResourceNotFoundException;
+
 @WebMvcTest(DoctorController.class)
 class DoctorControllerTest {
 
@@ -61,5 +63,25 @@ class DoctorControllerTest {
         mockMvc.perform(get("/api/public/doctors").param("name", "Nonexistent"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(0)));
+    }
+
+    @Test
+    void returnsDoctorProfileWhenApprovedDoctorExists() throws Exception {
+        given(doctorService.getPubliclyDiscoverableDoctorById(1L))
+                .willReturn(new DoctorSummaryDto(1L, "Dr. Asha Rao", "Orthopedic consultant"));
+
+        mockMvc.perform(get("/api/public/doctors/1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(1))
+                .andExpect(jsonPath("$.name").value("Dr. Asha Rao"));
+    }
+
+    @Test
+    void returnsNotFoundWhenDoctorDoesNotExistOrIsNotApproved() throws Exception {
+        given(doctorService.getPubliclyDiscoverableDoctorById(99L))
+                .willThrow(new ResourceNotFoundException("Doctor not found"));
+
+        mockMvc.perform(get("/api/public/doctors/99"))
+                .andExpect(status().isNotFound());
     }
 }

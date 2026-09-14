@@ -3,6 +3,7 @@ package com.doctrip.backend.doctor;
 import java.util.List;
 
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -23,5 +24,10 @@ public class DoctorController {
             return doctorService.getPubliclyDiscoverableDoctors();
         }
         return doctorService.searchPubliclyDiscoverableDoctors(name);
+    }
+
+    @GetMapping("/{id}")
+    public DoctorSummaryDto getDoctorById(@PathVariable Long id) {
+        return doctorService.getPubliclyDiscoverableDoctorById(id);
     }
 }

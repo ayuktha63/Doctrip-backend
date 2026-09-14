@@ -4,6 +4,8 @@ import java.util.List;
 
 import org.springframework.stereotype.Service;
 
+import com.doctrip.backend.common.ResourceNotFoundException;
+
 @Service
 public class DoctorService {
 
@@ -25,5 +27,11 @@ public class DoctorService {
                 .stream()
                 .map(DoctorSummaryDto::from)
                 .toList();
+    }
+
+    public DoctorSummaryDto getPubliclyDiscoverableDoctorById(Long id) {
+        return doctorRepository.findByIdAndApprovedTrue(id)
+                .map(DoctorSummaryDto::from)
+                .orElseThrow(() -> new ResourceNotFoundException("Doctor not found"));
     }
 }
