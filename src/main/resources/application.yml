@@ -53,21 +53,5 @@ spring:
             user-name-attribute: sub
 
 doctrip:
-  jwt:
-    secret: ${JWT_SECRET:dev-only-secret-change-me-please-please-please}
-    expiry-seconds: 1800
   cors:
     allowed-origin: ${CORS_ALLOWED_ORIGIN:http://localhost:4200}
-  otp:
-    validity-seconds: 300
-    max-attempts: 5
-    resend-cooldown-seconds: 30
-    length: 6
-  login:
-    max-failed-attempts: 5
-    lockout-window-seconds: 900
-  oauth2:
-    frontend-redirect-uri: ${OAUTH2_FRONTEND_REDIRECT_URI:http://localhost:4200/auth/callback}
-
-logging:
-  config: classpath:logback-spring.xml

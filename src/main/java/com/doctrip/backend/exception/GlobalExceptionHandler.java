@@ -1,6 +1,7 @@
 package com.doctrip.backend.exception;
 
 import jakarta.servlet.http.HttpServletRequest;
+import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -27,11 +28,6 @@ public class GlobalExceptionHandler {
             message = "Validation failed.";
         }
         return build(HttpStatus.BAD_REQUEST, message, req);
-    }
-
-    @ExceptionHandler(BadRequestException.class)
-    public ResponseEntity<ApiError> handleBadRequest(BadRequestException ex, HttpServletRequest req) {
-        return build(HttpStatus.BAD_REQUEST, ex.getMessage(), req);
     }
 
     @ExceptionHandler(NotFoundException.class)

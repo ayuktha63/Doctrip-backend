@@ -10,4 +10,5 @@ databaseChangeLog:
       relativeToChangelogFile: false
   - include:
       file: db/changelog/changes/004-patient-terms-acceptance.sql
+      file: db/changelog/changes/001-hospital.sql
       relativeToChangelogFile: false

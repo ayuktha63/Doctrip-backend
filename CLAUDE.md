@@ -42,49 +42,47 @@ src/main/java/com/doctrip/backend/
   config/        SecurityConfig, PasswordEncoderConfig, OtpProperties, LoginProperties
 ```
 
-## OTP design (FR-02/FR-05)
+## Stack
 
-- `OtpChallenge` entity stores only a **hash** of the code (via the same `PasswordEncoder` bean
-  used for account passwords) plus channel/purpose/target/expiry/attempts — the plaintext OTP is
-  never persisted, logged, or returned from any service method except transiently into
-  `OtpDeliveryService.send(...)`.
-- `OtpService.issue(...)`: invalidates any previously-issued, still-live OTP for the same
-  patient+purpose before creating a new one (BR-07), and rejects a resend inside the configured
-  cooldown window (`doctrip.otp.resend-cooldown-seconds`, default 30s) with 429.
-- `OtpService.verify(...)`: rejects consumed/invalidated/expired codes and locks out after
-  `doctrip.otp.max-attempts` (default 5) wrong attempts, all with 400/429 responses — never a
-  generic 500.
-- **Rollback gotcha**: `OtpService.verify` is `@Transactional`, and the exceptions it throws on a
-  wrong/expired/locked OTP are unchecked, so Spring's default rollback behavior would silently
-  undo the attempt-count increment (and the audit record) along with everything else in that
-  transaction — defeating the attempt limit entirely. Fixed by moving both writes into their own
-  `REQUIRES_NEW` transactions: `OtpAttemptRecorder.recordAttempt(...)` and
-  `AuditService.record(...)` both commit independently of the caller's transaction outcome. Do not
-  inline those saves back into `OtpService`/`AuthService`'s own transactional methods.
-- `doctrip.otp.*` properties live in `config/OtpProperties.java`.
+- Spring Boot 3.3.4, Java 17, Maven, package `com.doctrip.backend`.
+- Postgres (local dev DB name `doctrip`), managed via **Liquibase** (formatted-SQL changesets in
+  `db/changelog/changes/*.sql`, included from `db.changelog-master.yaml`).
+- **Lombok** for entities (`@Getter/@Setter/@NoArgsConstructor/@AllArgsConstructor/@Builder`).
+- Config is env-var-driven via `application.yml` + `spring-dotenv` reading a gitignored `.env`
+  (see `.env.example` for the required keys — never put real secrets in `application.yml` itself).
 
-## Rate limiting — Redis-backed (FR-02/FR-04/FR-05/BR-06)
+## Story 3 — DocTrip Admin: Hospital Master Records
 
-- `OtpRateLimiter`/`LoginRateLimiter` are the abstractions. `RedisOtpRateLimiter` uses `SET NX EX`
-  (`StringRedisTemplate.opsForValue().setIfAbsent(key, "1", Duration)`) for the OTP resend
-  cooldown — atomic across concurrent requests, and doesn't need its own DB row/timestamp to derive
-  state from (an earlier version compared `OtpChallenge.createdAt` in the DB; replaced per the
-  user's explicit request to move rate limiting onto Redis). `RedisLoginRateLimiter` uses
-  `INCR`+`EXPIRE` keyed by the raw login identifier string (email or mobile, whatever the caller
-  typed) to lock out after `doctrip.login.max-failed-attempts` (default 5) failures within
-  `doctrip.login.lockout-window-seconds` (default 900s).
-- Both are `@Profile("!test")`; the `test` profile swaps in `InMemoryOtpRateLimiter`/
-  `InMemoryLoginRateLimiter` (in `src/test/java`, same package) with identical semantics, so the
-  test suite never needs a real Redis instance — same pattern as
-  `ConsoleOtpDeliveryService`/`CapturingOtpDeliveryService`.
-- `spring.data.redis.*` (`REDIS_HOST`/`REDIS_PORT`/`REDIS_PASSWORD`) configures the connection;
-  `spring-boot-starter-data-redis` autoconfigures a `StringRedisTemplate` — no custom `RedisConfig`
-  class needed for this usage.
-- Login-OTP success does **not** reset `LoginRateLimiter`'s failure counter for that identity — the
-  counter only tracks the password path's own brute-force attempts, and OTP login never reads or
-  clears it. Don't wire a cross-reset between the two without re-checking this is still the
-  intended behavior.
+This branch (`DT-3-story-3-doctrip-hospital-management`) is branched directly from `develop` and
+is intentionally **independent** of the patient-facing Story 1 branch — it does not reuse or
+depend on Story 1's `Patient`/OTP/OAuth/session code in any way. The two stories will be merged
+into `develop` separately.
 
+- **No admin authentication is built for this story.** The reference mockup
+  (`doctrip-web-panels 2.html`'s `Main.dc.html` artboard, labelled "Story 3 · Hospital
+  management") has no login screen and starts pre-authenticated — admin login/JWT auth is
+  explicitly out of scope here and belongs to a future story. `/api/admin/hospitals/**` is
+  currently open; don't add auth to it as a side effect of other work without a story for it.
+- **`Hospital`** is the only entity: `hospitalCode` (generated `HSP-%04d` from a Postgres
+  sequence), `name`, `type` (default `Multi-speciality`), `city`, `state` (default `Kerala`),
+  `registrationNumber`, `accreditation`, `beds`, `contactPerson`/`contactEmail`/`contactPhone`,
+  `active` (defaults **false** — new hospitals start inactive until explicitly activated),
+  `createdAt`/`updatedAt`.
+- **Duplicate check**: create/update reject a hospital whose `name`+`city` (case-insensitive)
+  already exists elsewhere, via a repository query — not just the DB's case-sensitive unique index
+  (`ux_hospital_name_city`), which is a backstop, not the primary validation path.
+- **Two controllers, two audiences**:
+  - `AdminHospitalController` (`/api/admin/hospitals`) — full CRUD + status toggle, for DocTrip
+    Admin.
+  - `HospitalDiscoveryController` (`/api/hospitals`) — public, read-only, **active hospitals
+    only**, and returns the narrow `HospitalSummaryResponse` shape (no registration number, no
+    contact details) — never widen this response without checking what's meant to stay
+    admin-only.
+- **Non-goals, don't build here**: department management, doctor management/assignment,
+  availability management, appointment coordination, doctor acknowledgement, patient booking.
+  DocTrip Admin only creates/views/edits/activates/deactivates hospital master records.
+- **CORS**: handled by a plain `WebMvcConfigurer` (`CorsConfig`), not Spring Security — there's no
+  security dependency on this branch at all.
 ## OTP delivery (dev stub — real providers not wired yet)
 
 - `OtpDeliveryService` is the abstraction; `ConsoleOtpDeliveryService` (`@Profile("!test")`) prints
@@ -246,17 +244,10 @@ src/main/java/com/doctrip/backend/
 ## Running & testing
 
 ```bash
-cp .env.example .env
-mvn spring-boot:run     # http://localhost:8081, requires Postgres + Redis reachable
-mvn test                 # runs against H2 + in-memory rate-limiter fakes, no external services needed
-mvn package               # builds target/doctrip-backend-0.0.1-SNAPSHOT.jar
+mvn spring-boot:run   # or ./mvnw if a wrapper is present
+mvn test
 ```
 
-## Constraints / things not to reintroduce
-
-- No hardcoded credentials, secrets, or origins anywhere in source — everything environment-driven
-  with documented defaults in `.env.example` / `application-example.yml`.
-- No Hibernate auto-DDL in real profiles (`ddl-auto: validate` only) — schema changes always go
-  through a new Liquibase changeset file.
-- Never persist, log, or return the plaintext OTP value anywhere outside `OtpService.issue`'s local
-  variable and its call into `OtpDeliveryService.send(...)`.
+Requires Postgres running locally with a `doctrip` database and `.env` populated (see
+`.env.example`). Backend serves on `http://localhost:8081`; CORS defaults to allow
+`http://localhost:4300` (the frontend's dev server port).
