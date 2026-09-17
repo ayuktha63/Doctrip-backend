@@ -6,6 +6,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import java.math.BigDecimal;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -15,7 +16,7 @@ import lombok.Setter;
 @Getter
 @Setter
 @NoArgsConstructor
-public class Hospital {
+public class DiscoveryHospital {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -29,4 +30,18 @@ public class Hospital {
 
     @Column(nullable = false)
     private boolean approved = false;
+
+    private String type;
+
+    private String city;
+
+    private Integer beds;
+
+    private BigDecimal rating;
+
+    private Integer reviewCount;
+
+    private String accreditation;
+
+    private String languages;
 }

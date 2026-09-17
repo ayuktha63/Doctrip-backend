@@ -12,9 +12,9 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/public/hospitals")
 public class HospitalController {
 
-    private final HospitalService hospitalService;
+    private final DiscoveryHospitalService hospitalService;
 
-    public HospitalController(HospitalService hospitalService) {
+    public HospitalController(DiscoveryHospitalService hospitalService) {
         this.hospitalService = hospitalService;
     }
 
@@ -27,7 +27,7 @@ public class HospitalController {
     }
 
     @GetMapping("/{id}")
-    public HospitalSummaryDto getHospitalById(@PathVariable Long id) {
+    public HospitalDetailDto getHospitalById(@PathVariable Long id) {
         return hospitalService.getPubliclyDiscoverableHospitalById(id);
     }
 }

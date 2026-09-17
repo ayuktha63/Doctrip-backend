@@ -6,29 +6,40 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.test.mock.mockito.MockBean;
+import com.doctrip.backend.security.JwtService;
+import com.doctrip.backend.repository.RevokedTokenRepository;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.doctrip.backend.common.ResourceNotFoundException;
 
 @WebMvcTest(DoctorController.class)
+@AutoConfigureMockMvc(addFilters = false)
 class DoctorControllerTest {
 
     @Autowired
     private MockMvc mockMvc;
 
-    @MockitoBean
+    @MockBean
+    private RevokedTokenRepository revokedTokenRepository;
+
+    @MockBean
+    private JwtService jwtService;
+
+    @MockBean
     private DoctorService doctorService;
 
     @Test
     void returnsApprovedDoctorsWhenAvailable() throws Exception {
         given(doctorService.getPubliclyDiscoverableDoctors())
-                .willReturn(List.of(new DoctorSummaryDto(1L, "Dr. Asha Rao", "Orthopedic consultant")));
+                .willReturn(List.of(new DoctorSummaryDto(1L, "Dr. Asha Rao", "Orthopedic consultant", "Orthopaedics", "Joint replacement", 18, new BigDecimal("4.9"), 218, "English, Malayalam", 1L, "Aster Medcity")));
 
         mockMvc.perform(get("/api/public/doctors"))
                 .andExpect(status().isOk())
@@ -48,7 +59,7 @@ class DoctorControllerTest {
     @Test
     void returnsMatchingDoctorsWhenSearchingByName() throws Exception {
         given(doctorService.searchPubliclyDiscoverableDoctors("Asha"))
-                .willReturn(List.of(new DoctorSummaryDto(1L, "Dr. Asha Rao", "Orthopedic consultant")));
+                .willReturn(List.of(new DoctorSummaryDto(1L, "Dr. Asha Rao", "Orthopedic consultant", "Orthopaedics", "Joint replacement", 18, new BigDecimal("4.9"), 218, "English, Malayalam", 1L, "Aster Medcity")));
 
         mockMvc.perform(get("/api/public/doctors").param("name", "Asha"))
                 .andExpect(status().isOk())
@@ -68,7 +79,8 @@ class DoctorControllerTest {
     @Test
     void returnsDoctorProfileWhenApprovedDoctorExists() throws Exception {
         given(doctorService.getPubliclyDiscoverableDoctorById(1L))
-                .willReturn(new DoctorSummaryDto(1L, "Dr. Asha Rao", "Orthopedic consultant"));
+                .willReturn(new DoctorDetailDto(1L, "Dr. Asha Rao", "Orthopedic consultant", "Orthopaedics",
+                        "Joint replacement", 18, new BigDecimal("4.9"), 218, "English, Malayalam", 1L, "Aster Medcity", List.of()));
 
         mockMvc.perform(get("/api/public/doctors/1"))
                 .andExpect(status().isOk())

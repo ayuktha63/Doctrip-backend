@@ -10,15 +10,19 @@ import java.util.List;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.http.HttpHeaders;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.boot.test.mock.mockito.MockBean;
+import com.doctrip.backend.security.JwtService;
+import com.doctrip.backend.repository.RevokedTokenRepository;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.doctrip.backend.treatmentpackage.TreatmentPackageController;
 import com.doctrip.backend.treatmentpackage.TreatmentPackageService;
 
 @WebMvcTest(TreatmentPackageController.class)
+@AutoConfigureMockMvc(addFilters = false)
 class WebConfigCorsTest {
 
     private static final String ANGULAR_DEV_ORIGIN = "http://localhost:4300";
@@ -26,7 +30,13 @@ class WebConfigCorsTest {
     @Autowired
     private MockMvc mockMvc;
 
-    @MockitoBean
+    @MockBean
+    private RevokedTokenRepository revokedTokenRepository;
+
+    @MockBean
+    private JwtService jwtService;
+
+    @MockBean
     private TreatmentPackageService treatmentPackageService;
 
     @Test

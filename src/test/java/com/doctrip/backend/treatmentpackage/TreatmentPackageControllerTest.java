@@ -6,29 +6,41 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.test.mock.mockito.MockBean;
+import com.doctrip.backend.security.JwtService;
+import com.doctrip.backend.repository.RevokedTokenRepository;
 import org.springframework.test.web.servlet.MockMvc;
 
 import com.doctrip.backend.common.ResourceNotFoundException;
 
 @WebMvcTest(TreatmentPackageController.class)
+@AutoConfigureMockMvc(addFilters = false)
 class TreatmentPackageControllerTest {
 
     @Autowired
     private MockMvc mockMvc;
 
-    @MockitoBean
+    @MockBean
+    private RevokedTokenRepository revokedTokenRepository;
+
+    @MockBean
+    private JwtService jwtService;
+
+    @MockBean
     private TreatmentPackageService treatmentPackageService;
 
     @Test
     void returnsApprovedPackagesWhenAvailable() throws Exception {
         given(treatmentPackageService.getPubliclyDiscoverablePackages())
-                .willReturn(List.of(new TreatmentPackageSummaryDto(1L, "Knee Replacement", "Full package")));
+                .willReturn(List.of(new TreatmentPackageSummaryDto(1L, "Knee Replacement", "Full package",
+                        "Orthopaedics", new BigDecimal("120000"), "10 days", 1L, "Aster Medcity")));
 
         mockMvc.perform(get("/api/public/treatment-packages"))
                 .andExpect(status().isOk())
@@ -48,7 +60,9 @@ class TreatmentPackageControllerTest {
     @Test
     void returnsPackageDetailsWhenApprovedPackageExists() throws Exception {
         given(treatmentPackageService.getPubliclyDiscoverablePackageById(1L))
-                .willReturn(new TreatmentPackageSummaryDto(1L, "Knee Replacement", "Full package"));
+                .willReturn(new TreatmentPackageDetailDto(1L, "Knee Replacement", "Full package",
+                        "Orthopaedics", new BigDecimal("120000"), "10 days", 1L, "Aster Medcity",
+                        "Kochi", "NABH · JCI", List.of()));
 
         mockMvc.perform(get("/api/public/treatment-packages/1"))
                 .andExpect(status().isOk())

@@ -23,7 +23,7 @@ public class TreatmentPackageController {
     }
 
     @GetMapping("/{id}")
-    public TreatmentPackageSummaryDto getTreatmentPackageById(@PathVariable Long id) {
+    public TreatmentPackageDetailDto getTreatmentPackageById(@PathVariable Long id) {
         return treatmentPackageService.getPubliclyDiscoverablePackageById(id);
     }
 }
