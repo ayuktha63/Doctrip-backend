@@ -53,5 +53,16 @@ spring:
             user-name-attribute: sub
 
 doctrip:
+  jwt:
+    secret: ${JWT_SECRET:changeme-not-for-production-use}
+    expiry-seconds: 1800
+    refresh-expiry-seconds: 2592000
   cors:
     allowed-origin: ${CORS_ALLOWED_ORIGIN:http://localhost:4200}
+  otp:
+    validity-seconds: 300
+    max-attempts: 5
+    resend-cooldown-seconds: 30
+    length: 6
+  oauth2:
+    frontend-redirect-uri: ${OAUTH2_FRONTEND_REDIRECT_URI:http://localhost:4200/auth/callback}
