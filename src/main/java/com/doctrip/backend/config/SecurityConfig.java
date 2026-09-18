@@ -32,6 +32,12 @@ public class SecurityConfig {
     private final OAuth2LoginSuccessHandler oAuth2LoginSuccessHandler;
     private final OAuth2LoginFailureHandler oAuth2LoginFailureHandler;
 
+    /**
+     * Comma-separated so the Flutter app's web build (a different dev-server port than the
+     * Angular frontend) can be allowed alongside it without displacing the existing single-origin
+     * default — mobile builds (Android/iOS) don't send an Origin header at all, so CORS never
+     * applies to them; this only matters for `flutter run -d chrome`.
+     */
     @Value("${doctrip.cors.allowed-origin:http://localhost:4200}")
     private String allowedOrigin;
 
@@ -97,7 +103,7 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOrigins(List.of(allowedOrigin));
+        configuration.setAllowedOrigins(List.of(allowedOrigin.split(",")).stream().map(String::trim).toList());
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("*"));
         configuration.setAllowCredentials(true);
