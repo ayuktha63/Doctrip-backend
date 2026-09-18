@@ -6,6 +6,8 @@ import com.doctrip.backend.dto.HospitalSummaryResponse;
 import com.doctrip.backend.entity.Hospital;
 import com.doctrip.backend.exception.ConflictException;
 import com.doctrip.backend.exception.NotFoundException;
+import com.doctrip.backend.hospital.DiscoveryHospital;
+import com.doctrip.backend.hospital.DiscoveryHospitalRepository;
 import com.doctrip.backend.repository.HospitalRepository;
 import java.util.List;
 import java.util.UUID;
@@ -16,9 +18,11 @@ import org.springframework.transaction.annotation.Transactional;
 public class HospitalService {
 
     private final HospitalRepository hospitalRepository;
+    private final DiscoveryHospitalRepository discoveryHospitalRepository;
 
-    public HospitalService(HospitalRepository hospitalRepository) {
+    public HospitalService(HospitalRepository hospitalRepository, DiscoveryHospitalRepository discoveryHospitalRepository) {
         this.hospitalRepository = hospitalRepository;
+        this.discoveryHospitalRepository = discoveryHospitalRepository;
     }
 
     @Transactional
@@ -41,7 +45,9 @@ public class HospitalService {
                 .contactPhone(request.contactPhone())
                 .build();
 
-        return toResponse(hospitalRepository.save(hospital));
+        Hospital saved = hospitalRepository.save(hospital);
+        syncDiscoveryHospital(saved);
+        return toResponse(saved);
     }
 
     public HospitalResponse get(UUID id) {
@@ -74,14 +80,40 @@ public class HospitalService {
         hospital.setContactEmail(request.contactEmail());
         hospital.setContactPhone(request.contactPhone());
 
-        return toResponse(hospitalRepository.save(hospital));
+        Hospital saved = hospitalRepository.save(hospital);
+        syncDiscoveryHospital(saved);
+        return toResponse(saved);
     }
 
     @Transactional
     public HospitalResponse setActive(UUID id, boolean active) {
         Hospital hospital = findOrThrow(id);
         hospital.setActive(active);
-        return toResponse(hospitalRepository.save(hospital));
+        Hospital saved = hospitalRepository.save(hospital);
+        syncDiscoveryHospital(saved);
+        return toResponse(saved);
+    }
+
+    /**
+     * Keeps the Story 2 public-discovery side (`hospitals` / DiscoveryHospital, what
+     * `/api/public/hospitals` actually reads) in sync with this admin console's hospital
+     * records. Without this, a hospital created/activated here never appears in patient-facing
+     * discovery — the two features shipped against separate tables and were never wired
+     * together. `approved` mirrors `active`: only hospitals the admin has activated should be
+     * publicly discoverable.
+     */
+    private void syncDiscoveryHospital(Hospital hospital) {
+        DiscoveryHospital discoveryHospital = discoveryHospitalRepository
+                .findByAdminHospitalId(hospital.getId())
+                .orElseGet(DiscoveryHospital::new);
+        discoveryHospital.setAdminHospitalId(hospital.getId());
+        discoveryHospital.setName(hospital.getName());
+        discoveryHospital.setType(hospital.getType());
+        discoveryHospital.setCity(hospital.getCity());
+        discoveryHospital.setBeds(hospital.getBeds());
+        discoveryHospital.setAccreditation(hospital.getAccreditation());
+        discoveryHospital.setApproved(hospital.isActive());
+        discoveryHospitalRepository.save(discoveryHospital);
     }
 
     public List<HospitalSummaryResponse> discover() {
