@@ -10,4 +10,10 @@ public interface TreatmentPackageRepository extends JpaRepository<TreatmentPacka
     List<TreatmentPackage> findByApprovedTrue();
 
     Optional<TreatmentPackage> findByIdAndApprovedTrue(Long id);
+
+    List<TreatmentPackage> findByHospital_Id(Long discoveryHospitalId);
+
+    boolean existsByHospital_IdAndNameIgnoreCase(Long discoveryHospitalId, String name);
+
+    boolean existsByHospital_IdAndNameIgnoreCaseAndIdNot(Long discoveryHospitalId, String name, Long id);
 }

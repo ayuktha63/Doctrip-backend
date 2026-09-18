@@ -72,7 +72,8 @@ public class SecurityConfig {
                                 "/api/hospitals",
                                 "/api/hospitals/**",
                                 "/api/admin/**",
-                                "/api/doctor/**"
+                                "/api/doctor/**",
+                                "/api/hospital-admin/auth/login"
                         ).permitAll()
                         .anyRequest().authenticated()
                 )
