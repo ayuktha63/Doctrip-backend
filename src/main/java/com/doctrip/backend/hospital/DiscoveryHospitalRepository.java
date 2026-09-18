@@ -2,6 +2,7 @@ package com.doctrip.backend.hospital;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 
@@ -12,4 +13,6 @@ public interface DiscoveryHospitalRepository extends JpaRepository<DiscoveryHosp
     List<DiscoveryHospital> findByApprovedTrueAndNameContainingIgnoreCase(String name);
 
     Optional<DiscoveryHospital> findByIdAndApprovedTrue(Long id);
+
+    Optional<DiscoveryHospital> findByAdminHospitalId(UUID adminHospitalId);
 }
