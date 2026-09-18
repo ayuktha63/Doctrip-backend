@@ -44,4 +44,8 @@ public class TreatmentPackage {
     private BigDecimal price;
 
     private String typicalStay;
+
+    /** Hospital-admin CRUD's "Consultation fee (₹)" field — not part of Story 2's original shape. */
+    @Column(name = "consultation_fee")
+    private BigDecimal consultationFee;
 }

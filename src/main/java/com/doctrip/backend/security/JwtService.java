@@ -52,6 +52,36 @@ public class JwtService {
         return parseClaims(token).getSubject();
     }
 
+    /**
+     * Hospital Admin login token — access-token-only (no refresh/rotation/logout for this actor,
+     * per the Story 4 plan). Subject is the hospital admin id; {@code role}/{@code hospitalId} are
+     * custom claims. Absent {@code role} claim on any other token means "patient token", preserving
+     * backward compatibility with every token already in flight.
+     */
+    public String generateHospitalAdminToken(UUID hospitalAdminId, UUID hospitalId) {
+        Date now = new Date();
+        Date exp = new Date(now.getTime() + expirySeconds * 1000);
+        return Jwts.builder()
+                .id(UUID.randomUUID().toString())
+                .subject(hospitalAdminId.toString())
+                .claim("role", "HOSPITAL_ADMIN")
+                .claim("hospitalId", hospitalId.toString())
+                .issuedAt(now)
+                .expiration(exp)
+                .signWith((SecretKey) signingKey)
+                .compact();
+    }
+
+    /** Null when the token carries no {@code role} claim (i.e. an ordinary patient token). */
+    public String extractRole(String token) {
+        return parseClaims(token).get("role", String.class);
+    }
+
+    /** Null when the token carries no {@code hospitalId} claim. */
+    public String extractHospitalId(String token) {
+        return parseClaims(token).get("hospitalId", String.class);
+    }
+
     /** The JWT ID (jti) claim — used as the revocation key so a logged-out access token can be denylisted. */
     public String extractJti(String token) {
         return parseClaims(token).getId();
