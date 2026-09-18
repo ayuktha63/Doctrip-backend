@@ -20,3 +20,9 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/006-discovery-enrichment.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/007-discovery-hospital-admin-link.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/008-backfill-discovery-hospitals.sql
+      relativeToChangelogFile: false
