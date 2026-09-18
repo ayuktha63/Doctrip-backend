@@ -14,3 +14,9 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/001-hospital.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/005-discovery-tables.sql
+      relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/006-discovery-enrichment.sql
+      relativeToChangelogFile: false
