@@ -50,4 +50,14 @@ public class AdminHospitalController {
     public HospitalResponse setStatus(@PathVariable UUID id, @RequestBody HospitalStatusRequest request) {
         return hospitalService.setActive(id, request.active());
     }
+
+    @PatchMapping("/{id}/hide-data")
+    public HospitalResponse hideData(@PathVariable UUID id) {
+        return hospitalService.setDataHidden(id, true);
+    }
+
+    @PatchMapping("/{id}/unhide-data")
+    public HospitalResponse unhideData(@PathVariable UUID id) {
+        return hospitalService.setDataHidden(id, false);
+    }
 }

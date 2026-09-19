@@ -144,7 +144,21 @@ public class HospitalService {
         discoveryHospital.setBeds(hospital.getBeds());
         discoveryHospital.setAccreditation(hospital.getAccreditation());
         discoveryHospital.setApproved(hospital.isActive());
+        discoveryHospital.setDataHidden(hospital.isDataHidden());
         discoveryHospitalRepository.save(discoveryHospital);
+    }
+
+    @Transactional
+    public HospitalResponse setDataHidden(UUID id, boolean dataHidden) {
+        Hospital hospital = findOrThrow(id);
+        HospitalResponse before = toResponse(hospital);
+
+        hospital.setDataHidden(dataHidden);
+        Hospital saved = hospitalRepository.save(hospital);
+        syncDiscoveryHospital(saved);
+        HospitalResponse after = toResponse(saved);
+        audit(saved.getId(), dataHidden ? "DATA_HIDDEN" : "DATA_UNHIDDEN", before, after);
+        return after;
     }
 
     public List<HospitalSummaryResponse> discover() {
@@ -183,6 +197,7 @@ public class HospitalService {
                 h.getContactEmail(),
                 h.getContactPhone(),
                 h.isActive(),
+                h.isDataHidden(),
                 h.getCreatedAt(),
                 h.getUpdatedAt());
     }

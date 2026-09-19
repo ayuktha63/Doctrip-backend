@@ -54,4 +54,10 @@ public class CoordinationDoctor {
     @Builder.Default
     @Column(nullable = false)
     private boolean available = true;
+
+    /** Links this coordination-eligibility row to Story 4's {@code entity.HospitalDoctor} that
+     *  created it — null for rows seeded directly (e.g. test fixtures), not sourced from Hospital
+     *  Admin's own doctor management. */
+    @Column(name = "hospital_doctor_id", unique = true)
+    private UUID hospitalDoctorId;
 }

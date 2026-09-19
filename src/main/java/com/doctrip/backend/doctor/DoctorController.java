@@ -30,4 +30,9 @@ public class DoctorController {
     public DoctorDetailDto getDoctorById(@PathVariable Long id) {
         return doctorService.getPubliclyDiscoverableDoctorById(id);
     }
+
+    @GetMapping("/{id}/availability")
+    public List<DoctorAvailabilitySlotDto> getAvailability(@PathVariable Long id) {
+        return doctorService.getAvailability(id);
+    }
 }

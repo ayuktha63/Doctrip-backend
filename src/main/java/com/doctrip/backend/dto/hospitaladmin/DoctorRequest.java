@@ -8,4 +8,5 @@ public record DoctorRequest(
         @NotBlank String name,
         @NotNull UUID departmentId,
         String specialty,
-        Integer experienceYears) {}
+        Integer experienceYears,
+        String email) {}

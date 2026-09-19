@@ -8,11 +8,11 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface DiscoveryHospitalRepository extends JpaRepository<DiscoveryHospital, Long> {
 
-    List<DiscoveryHospital> findByApprovedTrue();
+    List<DiscoveryHospital> findByApprovedTrueAndDataHiddenFalse();
 
-    List<DiscoveryHospital> findByApprovedTrueAndNameContainingIgnoreCase(String name);
+    List<DiscoveryHospital> findByApprovedTrueAndDataHiddenFalseAndNameContainingIgnoreCase(String name);
 
-    Optional<DiscoveryHospital> findByIdAndApprovedTrue(Long id);
+    Optional<DiscoveryHospital> findByIdAndApprovedTrueAndDataHiddenFalse(Long id);
 
     Optional<DiscoveryHospital> findByAdminHospitalId(UUID adminHospitalId);
 }

@@ -22,17 +22,17 @@ public class TreatmentPackageService {
     }
 
     public List<TreatmentPackageSummaryDto> getPubliclyDiscoverablePackages() {
-        return treatmentPackageRepository.findByApprovedTrue()
+        return treatmentPackageRepository.findPubliclyDiscoverable()
                 .stream()
                 .map(TreatmentPackageSummaryDto::from)
                 .toList();
     }
 
     public TreatmentPackageDetailDto getPubliclyDiscoverablePackageById(Long id) {
-        TreatmentPackage treatmentPackage = treatmentPackageRepository.findByIdAndApprovedTrue(id)
+        TreatmentPackage treatmentPackage = treatmentPackageRepository.findPubliclyDiscoverableById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Treatment package not found"));
         List<Doctor> team = (treatmentPackage.getHospital() != null && treatmentPackage.getDepartment() != null)
-                ? doctorRepository.findByApprovedTrueAndHospitalIdAndDepartment(
+                ? doctorRepository.findPubliclyDiscoverableByHospitalIdAndDepartment(
                         treatmentPackage.getHospital().getId(), treatmentPackage.getDepartment())
                 : List.of();
         return TreatmentPackageDetailDto.from(treatmentPackage, team);

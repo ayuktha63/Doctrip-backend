@@ -53,4 +53,8 @@ public class DiscoveryHospital {
      */
     @Column(name = "admin_hospital_id", unique = true)
     private UUID adminHospitalId;
+
+    /** Mirrors {@code entity.Hospital.dataHidden} — see that field's javadoc. */
+    @Column(name = "data_hidden", nullable = false)
+    private boolean dataHidden = false;
 }

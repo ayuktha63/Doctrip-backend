@@ -1,5 +1,6 @@
 package com.doctrip.backend.service;
 
+import com.doctrip.backend.dto.AppointmentRequestCreateRequest;
 import com.doctrip.backend.dto.AppointmentRequestDetailResponse;
 import com.doctrip.backend.dto.AppointmentRequestSummaryResponse;
 import com.doctrip.backend.dto.CoordinationLogEntryResponse;
@@ -7,6 +8,7 @@ import com.doctrip.backend.dto.DoctorAcknowledgementSummary;
 import com.doctrip.backend.dto.DoctorAvailabilityResponse;
 import com.doctrip.backend.dto.DoctorCandidateResponse;
 import com.doctrip.backend.dto.DoctorResponseRequest;
+import com.doctrip.backend.dto.PendingAcknowledgementResponse;
 import com.doctrip.backend.entity.AppointmentRequest;
 import com.doctrip.backend.entity.AppointmentRequestStatus;
 import com.doctrip.backend.entity.AuditLog;
@@ -14,15 +16,19 @@ import com.doctrip.backend.entity.CoordinationDoctor;
 import com.doctrip.backend.entity.DoctorAcknowledgementRequest;
 import com.doctrip.backend.entity.DoctorAcknowledgementStatus;
 import com.doctrip.backend.entity.Hospital;
+import com.doctrip.backend.entity.Patient;
 import com.doctrip.backend.exception.BadRequestException;
 import com.doctrip.backend.exception.ConflictException;
 import com.doctrip.backend.exception.ForbiddenException;
 import com.doctrip.backend.exception.NotFoundException;
+import com.doctrip.backend.hospital.DiscoveryHospital;
+import com.doctrip.backend.hospital.DiscoveryHospitalRepository;
 import com.doctrip.backend.repository.AppointmentRequestRepository;
 import com.doctrip.backend.repository.AuditLogRepository;
 import com.doctrip.backend.repository.DoctorAcknowledgementRequestRepository;
 import com.doctrip.backend.repository.CoordinationDoctorRepository;
 import com.doctrip.backend.repository.HospitalRepository;
+import com.doctrip.backend.repository.PatientRepository;
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
 import java.time.ZoneId;
@@ -88,6 +94,8 @@ public class AppointmentRequestService {
     private final AuditService auditService;
     private final NotificationService notificationService;
     private final DoctorAcknowledgementMailService doctorAcknowledgementMailService;
+    private final DiscoveryHospitalRepository discoveryHospitalRepository;
+    private final PatientRepository patientRepository;
     /** Self-injected (via a lazily-resolved proxy) so calls the class makes to its own {@code
      * REQUIRES_NEW} methods actually go through Spring's transactional proxy — a direct {@code
      * this.method()} call bypasses AOP entirely (the classic Spring self-invocation gap) and would
@@ -103,6 +111,8 @@ public class AppointmentRequestService {
             AuditService auditService,
             NotificationService notificationService,
             DoctorAcknowledgementMailService doctorAcknowledgementMailService,
+            DiscoveryHospitalRepository discoveryHospitalRepository,
+            PatientRepository patientRepository,
             @Lazy AppointmentRequestService self) {
         this.appointmentRequestRepository = appointmentRequestRepository;
         this.hospitalRepository = hospitalRepository;
@@ -112,6 +122,8 @@ public class AppointmentRequestService {
         this.auditService = auditService;
         this.notificationService = notificationService;
         this.doctorAcknowledgementMailService = doctorAcknowledgementMailService;
+        this.discoveryHospitalRepository = discoveryHospitalRepository;
+        this.patientRepository = patientRepository;
         this.self = self;
     }
 
@@ -121,9 +133,120 @@ public class AppointmentRequestService {
                 .toList();
     }
 
+    private static final List<DoctorAcknowledgementStatus> AWAITING_RESPONSE_STATUSES =
+            List.of(DoctorAcknowledgementStatus.PENDING, DoctorAcknowledgementStatus.ALTERNATIVE_PROPOSED);
+
+    /**
+     * "Doctor approvals" sidebar screen — every acknowledgement across this hospital's requests
+     * still waiting on a doctor's response (accept/reject/propose alternative), flattened across
+     * requests rather than scoped to one (unlike the per-request coordination list on
+     * AppointmentRequestDetailResponse). No Doctor login exists yet (see
+     * DoctorAcknowledgementController's doc comment) — this is where Hospital Admin records that
+     * response on a doctor's behalf.
+     */
+    public List<PendingAcknowledgementResponse> listPendingAcknowledgements(UUID hospitalId) {
+        List<AppointmentRequest> inProgress = appointmentRequestRepository
+                .findByHospitalIdOrderByCreatedAtDesc(hospitalId)
+                .stream()
+                .filter(r -> r.getStatus() == AppointmentRequestStatus.DOCTOR_COORDINATION)
+                .toList();
+
+        return inProgress.stream()
+                .flatMap(r -> doctorAcknowledgementRequestRepository
+                        .findByAppointmentRequestIdOrderBySentAtAsc(r.getId())
+                        .stream()
+                        .filter(a -> AWAITING_RESPONSE_STATUSES.contains(a.getStatus()))
+                        .map(a -> new PendingAcknowledgementResponse(
+                                a.getId(),
+                                r.getId(),
+                                r.getRequestCode(),
+                                r.getPatientName(),
+                                r.getDepartment(),
+                                a.getDoctorName(),
+                                a.getDoctorSpecialty(),
+                                a.getStatus().name(),
+                                a.getSentAt(),
+                                a.getResponseDeadline(),
+                                a.getProposedDate(),
+                                a.getProposedTime())))
+                .toList();
+    }
+
+    /** "My appointments" — the discover -> booking flow's submit step lands here (FR-01's intake). */
     @Transactional
-    public AppointmentRequestDetailResponse get(UUID id) {
+    public AppointmentRequestDetailResponse create(String patientId, AppointmentRequestCreateRequest body) {
+        Patient patient = patientRepository
+                .findById(patientId)
+                .orElseThrow(() -> new NotFoundException("Patient not found"));
+        DiscoveryHospital discoveryHospital = discoveryHospitalRepository
+                .findById(body.discoveryHospitalId())
+                .orElseThrow(() -> new NotFoundException("Hospital not found"));
+        UUID hospitalId = discoveryHospital.getAdminHospitalId();
+        if (hospitalId == null) {
+            throw new BadRequestException("This hospital isn't set up to receive appointment requests yet.");
+        }
+        Hospital hospital = hospitalRepository
+                .findById(hospitalId)
+                .orElseThrow(() -> new NotFoundException("Hospital not found"));
+
+        AppointmentRequest request = AppointmentRequest.builder()
+                .requestCode("APR-%04d".formatted(appointmentRequestRepository.nextRequestCodeSequence()))
+                .patientId(patientId)
+                .patientName(patient.getFullName())
+                .patientCountry(body.patientCountry())
+                .patientAge(body.patientAge())
+                .hospitalId(hospitalId)
+                .department(body.department())
+                .requestedDoctorName(body.requestedDoctorName())
+                .requestedDate(body.requestedDate())
+                .requestedTime(body.requestedTime())
+                .healthcareRequirement(body.healthcareRequirement())
+                .additionalInfo(body.additionalInfo())
+                .requiredDocuments(body.requiredDocuments() == null ? List.of() : body.requiredDocuments())
+                .status(AppointmentRequestStatus.REQUESTED)
+                .build();
+        request = appointmentRequestRepository.save(request);
+
+        auditService.record(patientId, "appointment_request_submitted", null, request.getId());
+        notificationService.notify(
+                "ADMIN", hospitalId.toString(), "appointment_request_submitted",
+                "New appointment request " + request.getRequestCode() + " from " + patient.getFullName() + ".");
+
+        return toDetail(request, hospital.getName());
+    }
+
+    /** "My appointments" list — scoped to the authenticated patient only (never another patient's). */
+    public List<AppointmentRequestSummaryResponse> listForPatient(String patientId) {
+        return appointmentRequestRepository.findByPatientIdOrderByCreatedAtDesc(patientId).stream()
+                .map(this::toSummary)
+                .toList();
+    }
+
+    /** Single-request detail for "My appointments", ownership-checked like {@link #cancel}/{@link #confirm}. */
+    @Transactional
+    public AppointmentRequestDetailResponse getForPatient(UUID id, String patientId) {
         AppointmentRequest request = findOrThrow(id);
+        if (!request.getPatientId().equals(patientId)) {
+            throw new ForbiddenException("This appointment request does not belong to you.");
+        }
+        Hospital hospital = hospitalRepository
+                .findById(request.getHospitalId())
+                .orElseThrow(() -> new NotFoundException("Hospital not found"));
+        return toDetail(request, hospital.getName());
+    }
+
+    /** "Coordination log" card on the patient's own detail screen, ownership-checked like {@link #getForPatient}. */
+    public List<CoordinationLogEntryResponse> getLogForPatient(UUID id, String patientId) {
+        AppointmentRequest request = findOrThrow(id);
+        if (!request.getPatientId().equals(patientId)) {
+            throw new ForbiddenException("This appointment request does not belong to you.");
+        }
+        return logEntriesFor(id);
+    }
+
+    @Transactional
+    public AppointmentRequestDetailResponse get(UUID id, UUID hospitalId) {
+        AppointmentRequest request = findOrThrowScoped(id, hospitalId);
         Hospital hospital = hospitalRepository
                 .findById(request.getHospitalId())
                 .orElseThrow(() -> new NotFoundException("Hospital not found"));
@@ -142,8 +265,12 @@ public class AppointmentRequestService {
      * request's own id so a patient with several requests never sees another request's history
      * mixed in.
      */
-    public List<CoordinationLogEntryResponse> getLog(UUID id) {
-        findOrThrow(id);
+    public List<CoordinationLogEntryResponse> getLog(UUID id, UUID hospitalId) {
+        findOrThrowScoped(id, hospitalId);
+        return logEntriesFor(id);
+    }
+
+    private List<CoordinationLogEntryResponse> logEntriesFor(UUID id) {
         return auditLogRepository.findByAppointmentRequestIdOrderByTimestampAsc(id).stream()
                 .map(this::toLogEntry)
                 .filter(java.util.Objects::nonNull)
@@ -154,6 +281,11 @@ public class AppointmentRequestService {
         String time = LOG_TIME_FORMAT.format(log.getTimestamp());
         String doctor = log.getChannel();
         return switch (log.getEvent()) {
+            case "appointment_request_submitted" -> CoordinationLogEntryResponse.builder()
+                    .title("Request submitted")
+                    .time(time)
+                    .body("Your request was received and is waiting for the hospital to begin coordination.")
+                    .build();
             case "doctor_coordination_started" -> CoordinationLogEntryResponse.builder()
                     .title("Coordination started")
                     .time(time)
@@ -217,8 +349,8 @@ public class AppointmentRequestService {
     }
 
     /** FR-02/FR-04/FR-05 — preview who's eligible before actually sending acknowledgement requests. */
-    public DoctorAvailabilityResponse getDoctorAvailability(UUID id) {
-        AppointmentRequest request = findOrThrow(id);
+    public DoctorAvailabilityResponse getDoctorAvailability(UUID id, UUID hospitalId) {
+        AppointmentRequest request = findOrThrowScoped(id, hospitalId);
         List<CoordinationDoctor> eligible =
                 doctorRepository.findByHospitalIdAndDepartmentAndAvailableTrue(request.getHospitalId(), request.getDepartment());
 
@@ -238,8 +370,8 @@ public class AppointmentRequestService {
      * right before sending, not just whenever the admin last looked.
      */
     @Transactional
-    public AppointmentRequestDetailResponse startCoordination(UUID id) {
-        AppointmentRequest request = findOrThrow(id);
+    public AppointmentRequestDetailResponse startCoordination(UUID id, UUID hospitalId) {
+        AppointmentRequest request = findOrThrowScoped(id, hospitalId);
 
         if (request.getStatus() != AppointmentRequestStatus.REQUESTED) {
             throw new ConflictException("Doctor coordination has already been started for this request.");
@@ -665,8 +797,8 @@ public class AppointmentRequestService {
      * (BR-16) — not built in this slice.
      */
     @Transactional
-    public AppointmentRequestDetailResponse resolveAlternative(UUID requestId) {
-        AppointmentRequest request = findOrThrow(requestId);
+    public AppointmentRequestDetailResponse resolveAlternative(UUID requestId, UUID hospitalId) {
+        AppointmentRequest request = findOrThrowScoped(requestId, hospitalId);
         if (request.getStatus() != AppointmentRequestStatus.DOCTOR_COORDINATION) {
             throw new ConflictException("This request is not awaiting an alternative-slot decision.");
         }
@@ -727,11 +859,27 @@ public class AppointmentRequestService {
                 .orElseThrow(() -> new NotFoundException("Appointment request not found"));
     }
 
+    /**
+     * Tenant-isolation guard for every Hospital-Admin-facing lookup — 404s (not 403) on a request
+     * belonging to another hospital, same as a nonexistent id, so a caller can't distinguish
+     * "wrong hospital" from "doesn't exist" and enumerate other hospitals' request ids.
+     */
+    private AppointmentRequest findOrThrowScoped(UUID id, UUID hospitalId) {
+        AppointmentRequest request = findOrThrow(id);
+        if (!request.getHospitalId().equals(hospitalId)) {
+            throw new NotFoundException("Appointment request not found");
+        }
+        return request;
+    }
+
     private AppointmentRequestSummaryResponse toSummary(AppointmentRequest r) {
         boolean breached = Instant.now().isAfter(r.getAdminSlaDeadline());
+        String hospitalName = hospitalRepository.findById(r.getHospitalId()).map(Hospital::getName).orElse(null);
+        DoctorAcknowledgementRequest secured = findSecuredAck(r.getId());
         return new AppointmentRequestSummaryResponse(
                 r.getId(),
                 r.getRequestCode(),
+                hospitalName,
                 r.getPatientName(),
                 r.getPatientCountry(),
                 r.getDepartment(),
@@ -740,7 +888,20 @@ public class AppointmentRequestService {
                 r.getRequestedTime(),
                 r.getStatus(),
                 r.getAdminSlaDeadline(),
-                breached);
+                breached,
+                secured == null ? null : secured.getDoctorName(),
+                secured == null ? null : (secured.getProposedDate() != null ? secured.getProposedDate() : r.getRequestedDate()),
+                secured == null ? null : (secured.getProposedTime() != null ? secured.getProposedTime() : r.getRequestedTime()));
+    }
+
+    /** The doctor/slot actually secured for a request (ACCEPTED ack) — null before one exists. */
+    private DoctorAcknowledgementRequest findSecuredAck(UUID appointmentRequestId) {
+        return doctorAcknowledgementRequestRepository
+                .findByAppointmentRequestIdOrderBySentAtAsc(appointmentRequestId)
+                .stream()
+                .filter(a -> a.getStatus() == DoctorAcknowledgementStatus.ACCEPTED)
+                .findFirst()
+                .orElse(null);
     }
 
     private AppointmentRequestDetailResponse toDetail(AppointmentRequest r, String hospitalName) {
@@ -761,10 +922,7 @@ public class AppointmentRequestService {
                         a.getProposedTime()))
                 .toList();
 
-        DoctorAcknowledgementRequest secured = acks.stream()
-                .filter(a -> a.getStatus() == DoctorAcknowledgementStatus.ACCEPTED)
-                .findFirst()
-                .orElse(null);
+        DoctorAcknowledgementRequest secured = findSecuredAck(r.getId());
 
         return new AppointmentRequestDetailResponse(
                 r.getId(),

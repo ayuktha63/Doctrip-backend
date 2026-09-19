@@ -30,6 +30,10 @@ public class HospitalAdmin {
     @Column(name = "password_hash", nullable = false)
     private String passwordHash;
 
+    /** Reversible copy for DocTrip Admin to view — see CredentialEncryptionService. */
+    @Column(name = "encrypted_password", columnDefinition = "TEXT")
+    private String encryptedPassword;
+
     @Column(nullable = false)
     private String name;
 

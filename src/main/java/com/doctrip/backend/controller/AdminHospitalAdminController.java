@@ -2,6 +2,7 @@ package com.doctrip.backend.controller;
 
 import com.doctrip.backend.dto.hospitaladmin.HospitalAdminCreateRequest;
 import com.doctrip.backend.dto.hospitaladmin.HospitalAdminResponse;
+import com.doctrip.backend.dto.hospitaladmin.HospitalAdminUpdateRequest;
 import com.doctrip.backend.service.HospitalAdminProvisioningService;
 import jakarta.validation.Valid;
 import java.util.List;
@@ -33,5 +34,10 @@ public class AdminHospitalAdminController {
     @GetMapping
     public List<HospitalAdminResponse> list(@RequestParam(required = false) UUID hospitalId) {
         return hospitalAdminProvisioningService.list(hospitalId);
+    }
+
+    @PutMapping("/{id}")
+    public HospitalAdminResponse update(@PathVariable UUID id, @Valid @RequestBody HospitalAdminUpdateRequest request) {
+        return hospitalAdminProvisioningService.update(id, request);
     }
 }

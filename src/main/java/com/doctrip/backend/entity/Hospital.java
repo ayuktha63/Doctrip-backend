@@ -59,6 +59,17 @@ public class Hospital {
     @Column(nullable = false)
     private boolean active = false;
 
+    /**
+     * DocTrip Admin's "Hide data" toggle — distinct from {@code active}. Deactivation removes the
+     * hospital from patient-facing discovery entirely; this flag never deletes or hides a row from
+     * the database, it only greys out this hospital's own treatments/doctors/departments on
+     * admin-facing screens (DocTrip Admin's hospital detail, and that hospital's own Hospital Admin
+     * console) while still excluding them from public discovery, same as an inactive hospital.
+     */
+    @Builder.Default
+    @Column(name = "data_hidden", nullable = false)
+    private boolean dataHidden = false;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 

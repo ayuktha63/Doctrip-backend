@@ -21,6 +21,7 @@ import com.doctrip.backend.repository.HospitalRepository;
 import com.doctrip.backend.service.AppointmentRequestService;
 import com.doctrip.backend.service.CapturingNotificationService;
 import com.doctrip.backend.service.CapturingOtpDeliveryService;
+import com.doctrip.backend.security.JwtService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -77,7 +78,16 @@ class AppointmentCoordinationTests {
     @Autowired
     private CapturingNotificationService notificationService;
 
+    @Autowired
+    private JwtService jwtService;
+
     private static final AtomicInteger COUNTER = new AtomicInteger();
+
+    /** A real Hospital Admin JWT scoped to {@code h} — a fresh random admin id is fine since
+     * nothing in this flow looks up the admin row itself, only {@code hospitalId} matters. */
+    private String hospitalAdminAuth(Hospital h) {
+        return "Bearer " + jwtService.generateHospitalAdminToken(UUID.randomUUID(), h.getId());
+    }
 
     // ── fixtures ────────────────────────────────────────────────────────────────────────────
 
@@ -167,15 +177,46 @@ class AppointmentCoordinationTests {
         Hospital h = hospital();
         AppointmentRequest r = requestFor(patient.patientId(), h.getId(), "Cardiology", "Dr. Anil Kumar");
 
-        mockMvc.perform(get("/api/admin/appointment-requests").param("hospitalId", h.getId().toString()))
+        mockMvc.perform(get("/api/hospital-admin/appointment-requests").header("Authorization", hospitalAdminAuth(h)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].requestCode").value(r.getRequestCode()));
 
-        mockMvc.perform(get("/api/admin/appointment-requests/" + r.getId()))
+        mockMvc.perform(get("/api/hospital-admin/appointment-requests/" + r.getId())
+                .header("Authorization", hospitalAdminAuth(h)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.patientName").value("Test Patient"))
                 .andExpect(jsonPath("$.department").value("Cardiology"))
                 .andExpect(jsonPath("$.status").value("REQUESTED"));
+    }
+
+    @Test
+    void hospitalAdminCannotReadAnotherHospitalsAppointmentRequest() throws Exception {
+        AuthedPatient patient = registerAndVerifyPatient("crosstenant@example.com");
+        Hospital owner = hospital();
+        Hospital other = hospital();
+        AppointmentRequest r = requestFor(patient.patientId(), owner.getId(), "Cardiology", "Dr. Anil Kumar");
+
+        // The owning hospital's own admin token can read it fine.
+        mockMvc.perform(get("/api/hospital-admin/appointment-requests/" + r.getId())
+                        .header("Authorization", hospitalAdminAuth(owner)))
+                .andExpect(status().isOk());
+
+        // A different hospital's admin token must not be able to see it — 404, not 403, to avoid
+        // leaking existence of a request id belonging to another tenant.
+        mockMvc.perform(get("/api/hospital-admin/appointment-requests/" + r.getId())
+                        .header("Authorization", hospitalAdminAuth(other)))
+                .andExpect(status().isNotFound());
+
+        // Nor does the other hospital's list include it.
+        mockMvc.perform(get("/api/hospital-admin/appointment-requests")
+                        .header("Authorization", hospitalAdminAuth(other)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(0));
+
+        // And the other hospital's admin cannot start coordination on it either.
+        mockMvc.perform(post("/api/hospital-admin/appointment-requests/" + r.getId() + "/coordination/start")
+                        .header("Authorization", hospitalAdminAuth(other)))
+                .andExpect(status().isNotFound());
     }
 
     // ── FR-04 — requested doctor available ─────────────────────────────────────────────────
@@ -188,13 +229,15 @@ class AppointmentCoordinationTests {
         doctor(h.getId(), "Cardiology", true); // another eligible doctor who must NOT be contacted
         AppointmentRequest r = requestFor(patient.patientId(), h.getId(), "Cardiology", requested.getName());
 
-        String body = mockMvc.perform(get("/api/admin/appointment-requests/" + r.getId() + "/doctor-availability"))
+        String body = mockMvc.perform(get("/api/hospital-admin/appointment-requests/" + r.getId() + "/doctor-availability")
+                .header("Authorization", hospitalAdminAuth(h)))
                 .andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString();
         DoctorAvailabilityResponse availability = objectMapper.readValue(body, DoctorAvailabilityResponse.class);
         assertThat(availability.requestedDoctorAvailable()).isTrue();
 
-        mockMvc.perform(post("/api/admin/appointment-requests/" + r.getId() + "/coordination/start"))
+        mockMvc.perform(post("/api/hospital-admin/appointment-requests/" + r.getId() + "/coordination/start")
+                .header("Authorization", hospitalAdminAuth(h)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("DOCTOR_COORDINATION"))
                 .andExpect(jsonPath("$.coordination.length()").value(1))
@@ -208,9 +251,11 @@ class AppointmentCoordinationTests {
         doctor(h.getId(), "Cardiology", true);
         AppointmentRequest r = requestFor(patient.patientId(), h.getId(), "Cardiology", null);
 
-        mockMvc.perform(post("/api/admin/appointment-requests/" + r.getId() + "/coordination/start"))
+        mockMvc.perform(post("/api/hospital-admin/appointment-requests/" + r.getId() + "/coordination/start")
+                .header("Authorization", hospitalAdminAuth(h)))
                 .andExpect(status().isOk());
-        mockMvc.perform(post("/api/admin/appointment-requests/" + r.getId() + "/coordination/start"))
+        mockMvc.perform(post("/api/hospital-admin/appointment-requests/" + r.getId() + "/coordination/start")
+                .header("Authorization", hospitalAdminAuth(h)))
                 .andExpect(status().isConflict());
     }
 
@@ -225,7 +270,8 @@ class AppointmentCoordinationTests {
         doctor(h.getId(), "Cardiology", false); // unavailable — must be excluded
         AppointmentRequest r = requestFor(patient.patientId(), h.getId(), "Cardiology", null);
 
-        mockMvc.perform(post("/api/admin/appointment-requests/" + r.getId() + "/coordination/start"))
+        mockMvc.perform(post("/api/hospital-admin/appointment-requests/" + r.getId() + "/coordination/start")
+                .header("Authorization", hospitalAdminAuth(h)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.coordination.length()").value(2));
 
@@ -240,7 +286,8 @@ class AppointmentCoordinationTests {
         Hospital h = hospital();
         AppointmentRequest r = requestFor(patient.patientId(), h.getId(), "Neurology", null);
 
-        mockMvc.perform(post("/api/admin/appointment-requests/" + r.getId() + "/coordination/start"))
+        mockMvc.perform(post("/api/hospital-admin/appointment-requests/" + r.getId() + "/coordination/start")
+                .header("Authorization", hospitalAdminAuth(h)))
                 .andExpect(status().isConflict());
     }
 
@@ -253,7 +300,8 @@ class AppointmentCoordinationTests {
         doctor(h.getId(), "Cardiology", true);
         doctor(h.getId(), "Cardiology", true);
         AppointmentRequest r = requestFor(patient.patientId(), h.getId(), "Cardiology", null);
-        mockMvc.perform(post("/api/admin/appointment-requests/" + r.getId() + "/coordination/start"))
+        mockMvc.perform(post("/api/hospital-admin/appointment-requests/" + r.getId() + "/coordination/start")
+                .header("Authorization", hospitalAdminAuth(h)))
                 .andExpect(status().isOk());
 
         List<DoctorAcknowledgementRequest> acks = acksFor(r.getId());
@@ -287,7 +335,8 @@ class AppointmentCoordinationTests {
         doctor(h.getId(), "Cardiology", true);
         doctor(h.getId(), "Cardiology", true);
         AppointmentRequest r = requestFor(patient.patientId(), h.getId(), "Cardiology", null);
-        mockMvc.perform(post("/api/admin/appointment-requests/" + r.getId() + "/coordination/start"))
+        mockMvc.perform(post("/api/hospital-admin/appointment-requests/" + r.getId() + "/coordination/start")
+                .header("Authorization", hospitalAdminAuth(h)))
                 .andExpect(status().isOk());
 
         List<DoctorAcknowledgementRequest> acks = acksFor(r.getId());
@@ -295,7 +344,8 @@ class AppointmentCoordinationTests {
         proposeAlternative(acks.get(0).getId(), LocalDate.now().plusDays(10), LocalTime.of(10, 0));
         proposeAlternative(acks.get(1).getId(), LocalDate.now().plusDays(8), LocalTime.of(14, 0)); // earlier
 
-        mockMvc.perform(post("/api/admin/appointment-requests/" + r.getId() + "/coordination/resolve-alternative"))
+        mockMvc.perform(post("/api/hospital-admin/appointment-requests/" + r.getId() + "/coordination/resolve-alternative")
+                .header("Authorization", hospitalAdminAuth(h)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("DOCTOR_SELECTED"))
                 .andExpect(jsonPath("$.securedDoctorName").value(acks.get(1).getDoctorName()));
@@ -317,7 +367,8 @@ class AppointmentCoordinationTests {
         doctor(h.getId(), "Cardiology", true);
         doctor(h.getId(), "Cardiology", true);
         AppointmentRequest r = requestFor(patient.patientId(), h.getId(), "Cardiology", null);
-        mockMvc.perform(post("/api/admin/appointment-requests/" + r.getId() + "/coordination/start"))
+        mockMvc.perform(post("/api/hospital-admin/appointment-requests/" + r.getId() + "/coordination/start")
+                .header("Authorization", hospitalAdminAuth(h)))
                 .andExpect(status().isOk());
 
         List<DoctorAcknowledgementRequest> acks = acksFor(r.getId());
@@ -339,7 +390,8 @@ class AppointmentCoordinationTests {
         doctor(h.getId(), "Cardiology", true);
         doctor(h.getId(), "Cardiology", true);
         AppointmentRequest r = requestFor(patient.patientId(), h.getId(), "Cardiology", null);
-        mockMvc.perform(post("/api/admin/appointment-requests/" + r.getId() + "/coordination/start"))
+        mockMvc.perform(post("/api/hospital-admin/appointment-requests/" + r.getId() + "/coordination/start")
+                .header("Authorization", hospitalAdminAuth(h)))
                 .andExpect(status().isOk());
 
         List<DoctorAcknowledgementRequest> acks = acksFor(r.getId());
@@ -386,7 +438,8 @@ class AppointmentCoordinationTests {
         Hospital h = hospital();
         CoordinationDoctor d = doctor(h.getId(), "Cardiology", true);
         AppointmentRequest r = requestFor(patient.patientId(), h.getId(), "Cardiology", d.getName());
-        mockMvc.perform(post("/api/admin/appointment-requests/" + r.getId() + "/coordination/start"))
+        mockMvc.perform(post("/api/hospital-admin/appointment-requests/" + r.getId() + "/coordination/start")
+                .header("Authorization", hospitalAdminAuth(h)))
                 .andExpect(status().isOk());
         UUID ackId = acksFor(r.getId()).get(0).getId();
 
@@ -418,7 +471,8 @@ class AppointmentCoordinationTests {
                         .header("Authorization", "Bearer " + patient.accessToken()))
                 .andExpect(status().isConflict());
 
-        mockMvc.perform(post("/api/admin/appointment-requests/" + r.getId() + "/coordination/start"))
+        mockMvc.perform(post("/api/hospital-admin/appointment-requests/" + r.getId() + "/coordination/start")
+                .header("Authorization", hospitalAdminAuth(h)))
                 .andExpect(status().isOk());
         UUID ackId = acksFor(r.getId()).get(0).getId();
         mockMvc.perform(post("/api/doctor/acknowledgements/" + ackId + "/respond")
@@ -480,7 +534,8 @@ class AppointmentCoordinationTests {
         Hospital h = hospital();
         doctor(h.getId(), "Cardiology", true);
         AppointmentRequest r = requestFor(patient.patientId(), h.getId(), "Cardiology", null);
-        mockMvc.perform(post("/api/admin/appointment-requests/" + r.getId() + "/coordination/start"))
+        mockMvc.perform(post("/api/hospital-admin/appointment-requests/" + r.getId() + "/coordination/start")
+                .header("Authorization", hospitalAdminAuth(h)))
                 .andExpect(status().isOk());
 
         // Admin already started it — the "system" pass must be a no-op (BR-03/EC-13), not re-fan-out.
@@ -497,7 +552,8 @@ class AppointmentCoordinationTests {
         Hospital h = hospital();
         CoordinationDoctor d = doctor(h.getId(), "Cardiology", true);
         AppointmentRequest r = requestFor(patient.patientId(), h.getId(), "Cardiology", d.getName());
-        mockMvc.perform(post("/api/admin/appointment-requests/" + r.getId() + "/coordination/start"))
+        mockMvc.perform(post("/api/hospital-admin/appointment-requests/" + r.getId() + "/coordination/start")
+                .header("Authorization", hospitalAdminAuth(h)))
                 .andExpect(status().isOk());
 
         DoctorAcknowledgementRequest ack = acksFor(r.getId()).get(0);
@@ -524,7 +580,8 @@ class AppointmentCoordinationTests {
         doctor(h.getId(), "Cardiology", true);
         doctor(h.getId(), "Cardiology", true);
         AppointmentRequest r = requestFor(patient.patientId(), h.getId(), "Cardiology", null);
-        mockMvc.perform(post("/api/admin/appointment-requests/" + r.getId() + "/coordination/start"))
+        mockMvc.perform(post("/api/hospital-admin/appointment-requests/" + r.getId() + "/coordination/start")
+                .header("Authorization", hospitalAdminAuth(h)))
                 .andExpect(status().isOk());
 
         List<DoctorAcknowledgementRequest> acks = acksFor(r.getId());
@@ -550,7 +607,8 @@ class AppointmentCoordinationTests {
         Hospital h = hospital();
         CoordinationDoctor d = doctor(h.getId(), "Cardiology", true);
         AppointmentRequest r = requestFor(patient.patientId(), h.getId(), "Cardiology", d.getName());
-        mockMvc.perform(post("/api/admin/appointment-requests/" + r.getId() + "/coordination/start"))
+        mockMvc.perform(post("/api/hospital-admin/appointment-requests/" + r.getId() + "/coordination/start")
+                .header("Authorization", hospitalAdminAuth(h)))
                 .andExpect(status().isOk());
         UUID ackId = acksFor(r.getId()).get(0).getId();
 
@@ -579,7 +637,8 @@ class AppointmentCoordinationTests {
         CoordinationDoctor early = doctor(h.getId(), "Cardiology", true);
         CoordinationDoctor later = doctor(h.getId(), "Cardiology", true);
         AppointmentRequest r = requestFor(patient.patientId(), h.getId(), "Cardiology", null);
-        mockMvc.perform(post("/api/admin/appointment-requests/" + r.getId() + "/coordination/start"))
+        mockMvc.perform(post("/api/hospital-admin/appointment-requests/" + r.getId() + "/coordination/start")
+                .header("Authorization", hospitalAdminAuth(h)))
                 .andExpect(status().isOk());
 
         List<DoctorAcknowledgementRequest> acks = acksFor(r.getId());
@@ -595,7 +654,8 @@ class AppointmentCoordinationTests {
         early.setAvailable(false);
         doctorRepository.save(early);
 
-        mockMvc.perform(post("/api/admin/appointment-requests/" + r.getId() + "/coordination/resolve-alternative"))
+        mockMvc.perform(post("/api/hospital-admin/appointment-requests/" + r.getId() + "/coordination/resolve-alternative")
+                .header("Authorization", hospitalAdminAuth(h)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.securedDoctorName").value(later.getName()));
     }
@@ -606,7 +666,8 @@ class AppointmentCoordinationTests {
         Hospital h = hospital();
         CoordinationDoctor d = doctor(h.getId(), "Cardiology", true);
         AppointmentRequest r = requestFor(patient.patientId(), h.getId(), "Cardiology", null);
-        mockMvc.perform(post("/api/admin/appointment-requests/" + r.getId() + "/coordination/start"))
+        mockMvc.perform(post("/api/hospital-admin/appointment-requests/" + r.getId() + "/coordination/start")
+                .header("Authorization", hospitalAdminAuth(h)))
                 .andExpect(status().isOk());
         UUID ackId = acksFor(r.getId()).get(0).getId();
         proposeAlternative(ackId, LocalDate.now().plusDays(5), LocalTime.of(9, 0));
@@ -614,7 +675,8 @@ class AppointmentCoordinationTests {
         d.setAvailable(false);
         doctorRepository.save(d);
 
-        mockMvc.perform(post("/api/admin/appointment-requests/" + r.getId() + "/coordination/resolve-alternative"))
+        mockMvc.perform(post("/api/hospital-admin/appointment-requests/" + r.getId() + "/coordination/resolve-alternative")
+                .header("Authorization", hospitalAdminAuth(h)))
                 .andExpect(status().isConflict());
     }
 
@@ -626,7 +688,8 @@ class AppointmentCoordinationTests {
         Hospital h = hospital();
         CoordinationDoctor d = doctor(h.getId(), "Cardiology", true);
         AppointmentRequest r = requestFor(patient.patientId(), h.getId(), "Cardiology", d.getName());
-        mockMvc.perform(post("/api/admin/appointment-requests/" + r.getId() + "/coordination/start"))
+        mockMvc.perform(post("/api/hospital-admin/appointment-requests/" + r.getId() + "/coordination/start")
+                .header("Authorization", hospitalAdminAuth(h)))
                 .andExpect(status().isOk());
         assertThat(notificationService.hasEventFor("DOCTOR", d.getId().toString(), "doctor_acknowledgement_request"))
                 .isTrue();
@@ -651,7 +714,8 @@ class AppointmentCoordinationTests {
         Hospital h = hospital();
         doctor(h.getId(), "Cardiology", true);
         AppointmentRequest r = requestFor(patient.patientId(), h.getId(), "Cardiology", null);
-        mockMvc.perform(post("/api/admin/appointment-requests/" + r.getId() + "/coordination/start"))
+        mockMvc.perform(post("/api/hospital-admin/appointment-requests/" + r.getId() + "/coordination/start")
+                .header("Authorization", hospitalAdminAuth(h)))
                 .andExpect(status().isOk());
         UUID ackId = acksFor(r.getId()).get(0).getId();
 
@@ -670,7 +734,8 @@ class AppointmentCoordinationTests {
         Hospital h = hospital();
         CoordinationDoctor d = doctor(h.getId(), "Cardiology", true);
         AppointmentRequest r = requestFor(patient.patientId(), h.getId(), "Cardiology", d.getName());
-        mockMvc.perform(post("/api/admin/appointment-requests/" + r.getId() + "/coordination/start"))
+        mockMvc.perform(post("/api/hospital-admin/appointment-requests/" + r.getId() + "/coordination/start")
+                .header("Authorization", hospitalAdminAuth(h)))
                 .andExpect(status().isOk());
 
         mockMvc.perform(post("/api/patient/appointment-requests/" + r.getId() + "/cancel")
@@ -690,7 +755,8 @@ class AppointmentCoordinationTests {
         CoordinationDoctor d = doctor(h.getId(), "Cardiology", true);
         AppointmentRequest r = requestFor(patient.patientId(), h.getId(), "Cardiology", d.getName());
 
-        mockMvc.perform(post("/api/admin/appointment-requests/" + r.getId() + "/coordination/start"))
+        mockMvc.perform(post("/api/hospital-admin/appointment-requests/" + r.getId() + "/coordination/start")
+                .header("Authorization", hospitalAdminAuth(h)))
                 .andExpect(status().isOk());
         UUID ackId = acksFor(r.getId()).get(0).getId();
         mockMvc.perform(post("/api/doctor/acknowledgements/" + ackId + "/respond")
@@ -698,7 +764,8 @@ class AppointmentCoordinationTests {
                         .content(objectMapper.writeValueAsString(new DoctorResponseRequest("ACCEPT", null, null))))
                 .andExpect(status().isOk());
 
-        mockMvc.perform(get("/api/admin/appointment-requests/" + r.getId() + "/log"))
+        mockMvc.perform(get("/api/hospital-admin/appointment-requests/" + r.getId() + "/log")
+                .header("Authorization", hospitalAdminAuth(h)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(2))
                 .andExpect(jsonPath("$[0].title").value("Coordination started"))
@@ -715,16 +782,20 @@ class AppointmentCoordinationTests {
         AppointmentRequest r1 = requestFor(patient.patientId(), h.getId(), "Cardiology", d1.getName());
         AppointmentRequest r2 = requestFor(patient.patientId(), h.getId(), "Neurology", d2.getName());
 
-        mockMvc.perform(post("/api/admin/appointment-requests/" + r1.getId() + "/coordination/start"))
+        mockMvc.perform(post("/api/hospital-admin/appointment-requests/" + r1.getId() + "/coordination/start")
+                .header("Authorization", hospitalAdminAuth(h)))
                 .andExpect(status().isOk());
-        mockMvc.perform(post("/api/admin/appointment-requests/" + r2.getId() + "/coordination/start"))
+        mockMvc.perform(post("/api/hospital-admin/appointment-requests/" + r2.getId() + "/coordination/start")
+                .header("Authorization", hospitalAdminAuth(h)))
                 .andExpect(status().isOk());
 
-        mockMvc.perform(get("/api/admin/appointment-requests/" + r1.getId() + "/log"))
+        mockMvc.perform(get("/api/hospital-admin/appointment-requests/" + r1.getId() + "/log")
+                .header("Authorization", hospitalAdminAuth(h)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(1))
                 .andExpect(jsonPath("$[0].title").value("Coordination started"));
-        mockMvc.perform(get("/api/admin/appointment-requests/" + r2.getId() + "/log"))
+        mockMvc.perform(get("/api/hospital-admin/appointment-requests/" + r2.getId() + "/log")
+                .header("Authorization", hospitalAdminAuth(h)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(1))
                 .andExpect(jsonPath("$[0].title").value("Coordination started"));
@@ -735,11 +806,13 @@ class AppointmentCoordinationTests {
                         .content(objectMapper.writeValueAsString(new DoctorResponseRequest("ACCEPT", null, null))))
                 .andExpect(status().isOk());
 
-        mockMvc.perform(get("/api/admin/appointment-requests/" + r1.getId() + "/log"))
+        mockMvc.perform(get("/api/hospital-admin/appointment-requests/" + r1.getId() + "/log")
+                .header("Authorization", hospitalAdminAuth(h)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(2))
                 .andExpect(jsonPath("$[1].body", org.hamcrest.Matchers.containsString(d1.getName())));
-        mockMvc.perform(get("/api/admin/appointment-requests/" + r2.getId() + "/log"))
+        mockMvc.perform(get("/api/hospital-admin/appointment-requests/" + r2.getId() + "/log")
+                .header("Authorization", hospitalAdminAuth(h)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(1));
     }
