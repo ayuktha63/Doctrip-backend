@@ -24,13 +24,21 @@ public class HospitalAuditService {
         this.objectMapper = objectMapper;
     }
 
+    /** Existing hospital-admin call sites — unchanged, still always actor type HOSPITAL_ADMIN. */
     public void record(
             UUID hospitalId, UUID actorId, String entityType, UUID entityId, String action,
+            Object previousValue, Object newValue) {
+        record(hospitalId, ACTOR_TYPE_HOSPITAL_ADMIN, actorId, entityType, entityId, action, previousValue, newValue);
+    }
+
+    /** For non-hospital-admin actors (e.g. the DocTrip platform admin, see BE-2.15). */
+    public void record(
+            UUID hospitalId, String actorType, UUID actorId, String entityType, UUID entityId, String action,
             Object previousValue, Object newValue) {
         // TODO: wire email once a provider exists
         HospitalAuditLog log = HospitalAuditLog.builder()
                 .hospitalId(hospitalId)
-                .actorType(ACTOR_TYPE_HOSPITAL_ADMIN)
+                .actorType(actorType)
                 .actorId(actorId)
                 .entityType(entityType)
                 .entityId(entityId)
