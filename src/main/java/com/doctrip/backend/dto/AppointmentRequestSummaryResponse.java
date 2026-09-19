@@ -6,10 +6,15 @@ import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.UUID;
 
-/** Row shape for the Hospital Admin "Appointment requests" list (FR-01). */
+/**
+ * Row shape for the Hospital Admin "Appointment requests" list (FR-01) — reused for the
+ * Patient-facing "My appointments" list too, which is why {@code hospitalName} is here even
+ * though Hospital Admin already knows its own hospital's name.
+ */
 public record AppointmentRequestSummaryResponse(
         UUID id,
         String requestCode,
+        String hospitalName,
         String patientName,
         String patientCountry,
         String department,

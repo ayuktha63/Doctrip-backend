@@ -2,6 +2,7 @@ package com.doctrip.backend.service;
 
 import com.doctrip.backend.dto.hospitaladmin.HospitalAdminCreateRequest;
 import com.doctrip.backend.dto.hospitaladmin.HospitalAdminResponse;
+import com.doctrip.backend.dto.hospitaladmin.HospitalAdminUpdateRequest;
 import com.doctrip.backend.entity.HospitalAdmin;
 import com.doctrip.backend.exception.ConflictException;
 import com.doctrip.backend.exception.NotFoundException;
@@ -14,8 +15,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * DocTrip-admin-driven provisioning of Hospital Admin accounts — create + list only, no
- * self-registration, no update/deactivate for this story.
+ * DocTrip-admin-driven provisioning of Hospital Admin accounts — create, list and update (name /
+ * email / optionally password) — no self-registration, no deactivate for this story.
  */
 @Service
 public class HospitalAdminProvisioningService {
@@ -58,5 +59,23 @@ public class HospitalAdminProvisioningService {
                         ? hospitalAdminRepository.findByHospitalId(hospitalId)
                         : hospitalAdminRepository.findAll();
         return admins.stream().map(HospitalAdminResponse::from).toList();
+    }
+
+    @Transactional
+    public HospitalAdminResponse update(UUID id, HospitalAdminUpdateRequest request) {
+        HospitalAdmin admin =
+                hospitalAdminRepository.findById(id).orElseThrow(() -> new NotFoundException("Hospital admin not found."));
+
+        if (hospitalAdminRepository.existsByEmailIgnoreCaseAndIdNot(request.email(), id)) {
+            throw new ConflictException("A hospital admin with this email already exists.");
+        }
+
+        admin.setName(request.name().trim());
+        admin.setEmail(request.email().trim());
+        if (request.password() != null && !request.password().isBlank()) {
+            admin.setPasswordHash(passwordEncoder.encode(request.password()));
+        }
+
+        return HospitalAdminResponse.from(hospitalAdminRepository.save(admin));
     }
 }

@@ -65,3 +65,6 @@ databaseChangeLog:
   - include:
       file: db/changelog/changes/016-doctor-acknowledgement-email-message-id.sql
       relativeToChangelogFile: false
+  - include:
+      file: db/changelog/changes/017-discovery-doctor-hospital-doctor-link.sql
+      relativeToChangelogFile: false

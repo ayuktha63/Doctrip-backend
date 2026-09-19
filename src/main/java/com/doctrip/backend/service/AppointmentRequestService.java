@@ -1,5 +1,6 @@
 package com.doctrip.backend.service;
 
+import com.doctrip.backend.dto.AppointmentRequestCreateRequest;
 import com.doctrip.backend.dto.AppointmentRequestDetailResponse;
 import com.doctrip.backend.dto.AppointmentRequestSummaryResponse;
 import com.doctrip.backend.dto.CoordinationLogEntryResponse;
@@ -14,15 +15,19 @@ import com.doctrip.backend.entity.CoordinationDoctor;
 import com.doctrip.backend.entity.DoctorAcknowledgementRequest;
 import com.doctrip.backend.entity.DoctorAcknowledgementStatus;
 import com.doctrip.backend.entity.Hospital;
+import com.doctrip.backend.entity.Patient;
 import com.doctrip.backend.exception.BadRequestException;
 import com.doctrip.backend.exception.ConflictException;
 import com.doctrip.backend.exception.ForbiddenException;
 import com.doctrip.backend.exception.NotFoundException;
+import com.doctrip.backend.hospital.DiscoveryHospital;
+import com.doctrip.backend.hospital.DiscoveryHospitalRepository;
 import com.doctrip.backend.repository.AppointmentRequestRepository;
 import com.doctrip.backend.repository.AuditLogRepository;
 import com.doctrip.backend.repository.DoctorAcknowledgementRequestRepository;
 import com.doctrip.backend.repository.CoordinationDoctorRepository;
 import com.doctrip.backend.repository.HospitalRepository;
+import com.doctrip.backend.repository.PatientRepository;
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
 import java.time.ZoneId;
@@ -88,6 +93,8 @@ public class AppointmentRequestService {
     private final AuditService auditService;
     private final NotificationService notificationService;
     private final DoctorAcknowledgementMailService doctorAcknowledgementMailService;
+    private final DiscoveryHospitalRepository discoveryHospitalRepository;
+    private final PatientRepository patientRepository;
     /** Self-injected (via a lazily-resolved proxy) so calls the class makes to its own {@code
      * REQUIRES_NEW} methods actually go through Spring's transactional proxy — a direct {@code
      * this.method()} call bypasses AOP entirely (the classic Spring self-invocation gap) and would
@@ -103,6 +110,8 @@ public class AppointmentRequestService {
             AuditService auditService,
             NotificationService notificationService,
             DoctorAcknowledgementMailService doctorAcknowledgementMailService,
+            DiscoveryHospitalRepository discoveryHospitalRepository,
+            PatientRepository patientRepository,
             @Lazy AppointmentRequestService self) {
         this.appointmentRequestRepository = appointmentRequestRepository;
         this.hospitalRepository = hospitalRepository;
@@ -112,6 +121,8 @@ public class AppointmentRequestService {
         this.auditService = auditService;
         this.notificationService = notificationService;
         this.doctorAcknowledgementMailService = doctorAcknowledgementMailService;
+        this.discoveryHospitalRepository = discoveryHospitalRepository;
+        this.patientRepository = patientRepository;
         this.self = self;
     }
 
@@ -119,6 +130,78 @@ public class AppointmentRequestService {
         return appointmentRequestRepository.findByHospitalIdOrderByCreatedAtDesc(hospitalId).stream()
                 .map(this::toSummary)
                 .toList();
+    }
+
+    /** "My appointments" — the discover -> booking flow's submit step lands here (FR-01's intake). */
+    @Transactional
+    public AppointmentRequestDetailResponse create(String patientId, AppointmentRequestCreateRequest body) {
+        Patient patient = patientRepository
+                .findById(patientId)
+                .orElseThrow(() -> new NotFoundException("Patient not found"));
+        DiscoveryHospital discoveryHospital = discoveryHospitalRepository
+                .findById(body.discoveryHospitalId())
+                .orElseThrow(() -> new NotFoundException("Hospital not found"));
+        UUID hospitalId = discoveryHospital.getAdminHospitalId();
+        if (hospitalId == null) {
+            throw new BadRequestException("This hospital isn't set up to receive appointment requests yet.");
+        }
+        Hospital hospital = hospitalRepository
+                .findById(hospitalId)
+                .orElseThrow(() -> new NotFoundException("Hospital not found"));
+
+        AppointmentRequest request = AppointmentRequest.builder()
+                .requestCode("APR-%04d".formatted(appointmentRequestRepository.nextRequestCodeSequence()))
+                .patientId(patientId)
+                .patientName(patient.getFullName())
+                .patientCountry(body.patientCountry())
+                .patientAge(body.patientAge())
+                .hospitalId(hospitalId)
+                .department(body.department())
+                .requestedDoctorName(body.requestedDoctorName())
+                .requestedDate(body.requestedDate())
+                .requestedTime(body.requestedTime())
+                .healthcareRequirement(body.healthcareRequirement())
+                .additionalInfo(body.additionalInfo())
+                .requiredDocuments(body.requiredDocuments() == null ? List.of() : body.requiredDocuments())
+                .status(AppointmentRequestStatus.REQUESTED)
+                .build();
+        request = appointmentRequestRepository.save(request);
+
+        auditService.record(patientId, "appointment_request_submitted", null, request.getId());
+        notificationService.notify(
+                "ADMIN", hospitalId.toString(), "appointment_request_submitted",
+                "New appointment request " + request.getRequestCode() + " from " + patient.getFullName() + ".");
+
+        return toDetail(request, hospital.getName());
+    }
+
+    /** "My appointments" list — scoped to the authenticated patient only (never another patient's). */
+    public List<AppointmentRequestSummaryResponse> listForPatient(String patientId) {
+        return appointmentRequestRepository.findByPatientIdOrderByCreatedAtDesc(patientId).stream()
+                .map(this::toSummary)
+                .toList();
+    }
+
+    /** Single-request detail for "My appointments", ownership-checked like {@link #cancel}/{@link #confirm}. */
+    @Transactional
+    public AppointmentRequestDetailResponse getForPatient(UUID id, String patientId) {
+        AppointmentRequest request = findOrThrow(id);
+        if (!request.getPatientId().equals(patientId)) {
+            throw new ForbiddenException("This appointment request does not belong to you.");
+        }
+        Hospital hospital = hospitalRepository
+                .findById(request.getHospitalId())
+                .orElseThrow(() -> new NotFoundException("Hospital not found"));
+        return toDetail(request, hospital.getName());
+    }
+
+    /** "Coordination log" card on the patient's own detail screen, ownership-checked like {@link #getForPatient}. */
+    public List<CoordinationLogEntryResponse> getLogForPatient(UUID id, String patientId) {
+        AppointmentRequest request = findOrThrow(id);
+        if (!request.getPatientId().equals(patientId)) {
+            throw new ForbiddenException("This appointment request does not belong to you.");
+        }
+        return getLog(id);
     }
 
     @Transactional
@@ -729,9 +812,11 @@ public class AppointmentRequestService {
 
     private AppointmentRequestSummaryResponse toSummary(AppointmentRequest r) {
         boolean breached = Instant.now().isAfter(r.getAdminSlaDeadline());
+        String hospitalName = hospitalRepository.findById(r.getHospitalId()).map(Hospital::getName).orElse(null);
         return new AppointmentRequestSummaryResponse(
                 r.getId(),
                 r.getRequestCode(),
+                hospitalName,
                 r.getPatientName(),
                 r.getPatientCountry(),
                 r.getDepartment(),

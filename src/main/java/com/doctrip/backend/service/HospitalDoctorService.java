@@ -1,11 +1,15 @@
 package com.doctrip.backend.service;
 
+import com.doctrip.backend.doctor.Doctor;
+import com.doctrip.backend.doctor.DoctorRepository;
 import com.doctrip.backend.dto.hospitaladmin.DoctorRequest;
 import com.doctrip.backend.dto.hospitaladmin.DoctorResponse;
 import com.doctrip.backend.entity.Department;
 import com.doctrip.backend.entity.HospitalDoctor;
 import com.doctrip.backend.exception.ConflictException;
 import com.doctrip.backend.exception.NotFoundException;
+import com.doctrip.backend.hospital.DiscoveryHospital;
+import com.doctrip.backend.hospital.DiscoveryHospitalRepository;
 import com.doctrip.backend.repository.DepartmentRepository;
 import com.doctrip.backend.repository.HospitalDoctorRepository;
 import java.util.List;
@@ -20,14 +24,20 @@ public class HospitalDoctorService {
     private final HospitalDoctorRepository hospitalDoctorRepository;
     private final DepartmentRepository departmentRepository;
     private final HospitalAuditService hospitalAuditService;
+    private final DiscoveryHospitalRepository discoveryHospitalRepository;
+    private final DoctorRepository discoveryDoctorRepository;
 
     public HospitalDoctorService(
             HospitalDoctorRepository hospitalDoctorRepository,
             DepartmentRepository departmentRepository,
-            HospitalAuditService hospitalAuditService) {
+            HospitalAuditService hospitalAuditService,
+            DiscoveryHospitalRepository discoveryHospitalRepository,
+            DoctorRepository discoveryDoctorRepository) {
         this.hospitalDoctorRepository = hospitalDoctorRepository;
         this.departmentRepository = departmentRepository;
         this.hospitalAuditService = hospitalAuditService;
+        this.discoveryHospitalRepository = discoveryHospitalRepository;
+        this.discoveryDoctorRepository = discoveryDoctorRepository;
     }
 
     public List<DoctorResponse> list(UUID hospitalId) {
@@ -54,6 +64,7 @@ public class HospitalDoctorService {
                 .experienceYears(request.experienceYears())
                 .build();
         doctor = hospitalDoctorRepository.save(doctor);
+        syncDiscoveryDoctor(hospitalId, doctor, department.getName());
 
         DoctorResponse after = DoctorResponse.from(doctor, department.getName());
         hospitalAuditService.record(hospitalId, actorId, "DOCTOR", doctor.getId(), "CREATE", null, after);
@@ -80,6 +91,7 @@ public class HospitalDoctorService {
         doctor.setSpecialty(request.specialty());
         doctor.setExperienceYears(request.experienceYears());
         doctor = hospitalDoctorRepository.save(doctor);
+        syncDiscoveryDoctor(hospitalId, doctor, department.getName());
 
         DoctorResponse after = DoctorResponse.from(doctor, department.getName());
         hospitalAuditService.record(hospitalId, actorId, "DOCTOR", id, "UPDATE", before, after);
@@ -97,10 +109,39 @@ public class HospitalDoctorService {
 
         doctor.setActive(active);
         doctor = hospitalDoctorRepository.save(doctor);
+        syncDiscoveryDoctor(hospitalId, doctor, departmentName);
 
         DoctorResponse after = DoctorResponse.from(doctor, departmentName);
         hospitalAuditService.record(hospitalId, actorId, "DOCTOR", id, "STATUS_TOGGLE", before, after);
         return after;
+    }
+
+    /**
+     * Keeps the Story 2 public-discovery side (`doctors` / doctor.Doctor, what
+     * `/api/public/doctors` actually reads) in sync with this admin console's doctor records —
+     * same pattern as HospitalService.syncDiscoveryHospital. `approved` mirrors `active`; a
+     * discovery row is only created once the doctor's hospital itself has a linked
+     * DiscoveryHospital (i.e. the hospital has been synced — see syncDiscoveryHospital), since a
+     * doctor can't be publicly discoverable at a hospital that isn't.
+     */
+    private void syncDiscoveryDoctor(UUID hospitalId, HospitalDoctor doctor, String departmentName) {
+        DiscoveryHospital discoveryHospital = discoveryHospitalRepository
+                .findByAdminHospitalId(hospitalId)
+                .orElse(null);
+        if (discoveryHospital == null) {
+            return;
+        }
+        Doctor discoveryDoctor = discoveryDoctorRepository
+                .findByHospitalDoctorId(doctor.getId())
+                .orElseGet(Doctor::new);
+        discoveryDoctor.setHospitalDoctorId(doctor.getId());
+        discoveryDoctor.setHospital(discoveryHospital);
+        discoveryDoctor.setName(doctor.getName());
+        discoveryDoctor.setDepartment(departmentName);
+        discoveryDoctor.setSpecialty(doctor.getSpecialty());
+        discoveryDoctor.setExperienceYears(doctor.getExperienceYears());
+        discoveryDoctor.setApproved(doctor.isActive());
+        discoveryDoctorRepository.save(discoveryDoctor);
     }
 
     private HospitalDoctor findScoped(UUID hospitalId, UUID id) {

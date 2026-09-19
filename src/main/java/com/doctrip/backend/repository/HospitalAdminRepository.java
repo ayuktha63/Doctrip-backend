@@ -12,5 +12,7 @@ public interface HospitalAdminRepository extends JpaRepository<HospitalAdmin, UU
 
     boolean existsByEmailIgnoreCase(String email);
 
+    boolean existsByEmailIgnoreCaseAndIdNot(String email, UUID id);
+
     List<HospitalAdmin> findByHospitalId(UUID hospitalId);
 }

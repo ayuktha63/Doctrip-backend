@@ -14,6 +14,9 @@ public interface AppointmentRequestRepository extends JpaRepository<AppointmentR
 
     List<AppointmentRequest> findByHospitalIdOrderByCreatedAtDesc(UUID hospitalId);
 
+    /** "My appointments" — scoped to one patient only, never another patient's requests. */
+    List<AppointmentRequest> findByPatientIdOrderByCreatedAtDesc(String patientId);
+
     /** FR-03 — candidates for System takeover: still awaiting Hospital Admin, past their SLA. */
     List<AppointmentRequest> findByStatusAndAdminSlaDeadlineBefore(AppointmentRequestStatus status, Instant now);
 

@@ -11,6 +11,7 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import java.math.BigDecimal;
+import java.util.UUID;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -50,4 +51,8 @@ public class Doctor {
     private Integer reviewCount;
 
     private String languages;
+
+    /** Links this discovery-side row to Story 4's {@code entity.HospitalDoctor} that created it. */
+    @Column(name = "hospital_doctor_id", unique = true)
+    private UUID hospitalDoctorId;
 }
