@@ -15,6 +15,7 @@ import com.doctrip.backend.repository.AppointmentRequestRepository;
 import com.doctrip.backend.repository.CoordinationDoctorRepository;
 import com.doctrip.backend.repository.DoctorAcknowledgementRequestRepository;
 import com.doctrip.backend.repository.HospitalRepository;
+import com.doctrip.backend.security.JwtService;
 import com.doctrip.backend.service.CapturingDoctorAcknowledgementMailService;
 import com.doctrip.backend.service.CapturingOtpDeliveryService;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -69,7 +70,14 @@ class Story7EmailAcknowledgementTests {
     @Autowired
     private CapturingDoctorAcknowledgementMailService mailService;
 
+    @Autowired
+    private JwtService jwtService;
+
     private static final AtomicInteger COUNTER = new AtomicInteger();
+
+    private String hospitalAdminAuth(Hospital h) {
+        return "Bearer " + jwtService.generateHospitalAdminToken(UUID.randomUUID(), h.getId());
+    }
 
     private Hospital hospital() {
         int n = COUNTER.incrementAndGet();
@@ -152,7 +160,8 @@ class Story7EmailAcknowledgementTests {
         CoordinationDoctor d = doctor(h.getId(), "Cardiology", true, "doctor1@example.com");
         AppointmentRequest r = requestFor(patient.patientId(), h.getId(), "Cardiology");
 
-        mockMvc.perform(post("/api/admin/appointment-requests/" + r.getId() + "/coordination/start"))
+        mockMvc.perform(post("/api/hospital-admin/appointment-requests/" + r.getId() + "/coordination/start")
+                .header("Authorization", hospitalAdminAuth(h)))
                 .andExpect(status().isOk());
 
         DoctorAcknowledgementRequest ack = acksFor(r.getId()).get(0);
@@ -176,7 +185,8 @@ class Story7EmailAcknowledgementTests {
         doctor(h.getId(), "Cardiology", true, null);
         AppointmentRequest r = requestFor(patient.patientId(), h.getId(), "Cardiology");
 
-        mockMvc.perform(post("/api/admin/appointment-requests/" + r.getId() + "/coordination/start"))
+        mockMvc.perform(post("/api/hospital-admin/appointment-requests/" + r.getId() + "/coordination/start")
+                .header("Authorization", hospitalAdminAuth(h)))
                 .andExpect(status().isOk());
 
         DoctorAcknowledgementRequest ack = acksFor(r.getId()).get(0);
@@ -193,7 +203,8 @@ class Story7EmailAcknowledgementTests {
         Hospital h = hospital();
         CoordinationDoctor d = doctor(h.getId(), "Cardiology", true, "doctor2@example.com");
         AppointmentRequest r = requestFor(patient.patientId(), h.getId(), "Cardiology");
-        mockMvc.perform(post("/api/admin/appointment-requests/" + r.getId() + "/coordination/start"))
+        mockMvc.perform(post("/api/hospital-admin/appointment-requests/" + r.getId() + "/coordination/start")
+                .header("Authorization", hospitalAdminAuth(h)))
                 .andExpect(status().isOk());
         UUID ackId = acksFor(r.getId()).get(0).getId();
 
@@ -215,7 +226,8 @@ class Story7EmailAcknowledgementTests {
         doctor(h.getId(), "Cardiology", true, "doctor3@example.com");
         doctor(h.getId(), "Cardiology", true, "doctor4@example.com");
         AppointmentRequest r = requestFor(patient.patientId(), h.getId(), "Cardiology");
-        mockMvc.perform(post("/api/admin/appointment-requests/" + r.getId() + "/coordination/start"))
+        mockMvc.perform(post("/api/hospital-admin/appointment-requests/" + r.getId() + "/coordination/start")
+                .header("Authorization", hospitalAdminAuth(h)))
                 .andExpect(status().isOk());
         UUID ackId = acksFor(r.getId()).get(0).getId();
 
@@ -237,7 +249,8 @@ class Story7EmailAcknowledgementTests {
         Hospital h = hospital();
         doctor(h.getId(), "Cardiology", true, "doctor5@example.com");
         AppointmentRequest r = requestFor(patient.patientId(), h.getId(), "Cardiology");
-        mockMvc.perform(post("/api/admin/appointment-requests/" + r.getId() + "/coordination/start"))
+        mockMvc.perform(post("/api/hospital-admin/appointment-requests/" + r.getId() + "/coordination/start")
+                .header("Authorization", hospitalAdminAuth(h)))
                 .andExpect(status().isOk());
         UUID ackId = acksFor(r.getId()).get(0).getId();
 

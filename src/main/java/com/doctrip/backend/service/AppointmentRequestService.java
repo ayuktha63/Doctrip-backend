@@ -241,12 +241,12 @@ public class AppointmentRequestService {
         if (!request.getPatientId().equals(patientId)) {
             throw new ForbiddenException("This appointment request does not belong to you.");
         }
-        return getLog(id);
+        return logEntriesFor(id);
     }
 
     @Transactional
-    public AppointmentRequestDetailResponse get(UUID id) {
-        AppointmentRequest request = findOrThrow(id);
+    public AppointmentRequestDetailResponse get(UUID id, UUID hospitalId) {
+        AppointmentRequest request = findOrThrowScoped(id, hospitalId);
         Hospital hospital = hospitalRepository
                 .findById(request.getHospitalId())
                 .orElseThrow(() -> new NotFoundException("Hospital not found"));
@@ -265,8 +265,12 @@ public class AppointmentRequestService {
      * request's own id so a patient with several requests never sees another request's history
      * mixed in.
      */
-    public List<CoordinationLogEntryResponse> getLog(UUID id) {
-        findOrThrow(id);
+    public List<CoordinationLogEntryResponse> getLog(UUID id, UUID hospitalId) {
+        findOrThrowScoped(id, hospitalId);
+        return logEntriesFor(id);
+    }
+
+    private List<CoordinationLogEntryResponse> logEntriesFor(UUID id) {
         return auditLogRepository.findByAppointmentRequestIdOrderByTimestampAsc(id).stream()
                 .map(this::toLogEntry)
                 .filter(java.util.Objects::nonNull)
@@ -345,8 +349,8 @@ public class AppointmentRequestService {
     }
 
     /** FR-02/FR-04/FR-05 — preview who's eligible before actually sending acknowledgement requests. */
-    public DoctorAvailabilityResponse getDoctorAvailability(UUID id) {
-        AppointmentRequest request = findOrThrow(id);
+    public DoctorAvailabilityResponse getDoctorAvailability(UUID id, UUID hospitalId) {
+        AppointmentRequest request = findOrThrowScoped(id, hospitalId);
         List<CoordinationDoctor> eligible =
                 doctorRepository.findByHospitalIdAndDepartmentAndAvailableTrue(request.getHospitalId(), request.getDepartment());
 
@@ -366,8 +370,8 @@ public class AppointmentRequestService {
      * right before sending, not just whenever the admin last looked.
      */
     @Transactional
-    public AppointmentRequestDetailResponse startCoordination(UUID id) {
-        AppointmentRequest request = findOrThrow(id);
+    public AppointmentRequestDetailResponse startCoordination(UUID id, UUID hospitalId) {
+        AppointmentRequest request = findOrThrowScoped(id, hospitalId);
 
         if (request.getStatus() != AppointmentRequestStatus.REQUESTED) {
             throw new ConflictException("Doctor coordination has already been started for this request.");
@@ -793,8 +797,8 @@ public class AppointmentRequestService {
      * (BR-16) — not built in this slice.
      */
     @Transactional
-    public AppointmentRequestDetailResponse resolveAlternative(UUID requestId) {
-        AppointmentRequest request = findOrThrow(requestId);
+    public AppointmentRequestDetailResponse resolveAlternative(UUID requestId, UUID hospitalId) {
+        AppointmentRequest request = findOrThrowScoped(requestId, hospitalId);
         if (request.getStatus() != AppointmentRequestStatus.DOCTOR_COORDINATION) {
             throw new ConflictException("This request is not awaiting an alternative-slot decision.");
         }
@@ -853,6 +857,19 @@ public class AppointmentRequestService {
         return appointmentRequestRepository
                 .findById(id)
                 .orElseThrow(() -> new NotFoundException("Appointment request not found"));
+    }
+
+    /**
+     * Tenant-isolation guard for every Hospital-Admin-facing lookup — 404s (not 403) on a request
+     * belonging to another hospital, same as a nonexistent id, so a caller can't distinguish
+     * "wrong hospital" from "doesn't exist" and enumerate other hospitals' request ids.
+     */
+    private AppointmentRequest findOrThrowScoped(UUID id, UUID hospitalId) {
+        AppointmentRequest request = findOrThrow(id);
+        if (!request.getHospitalId().equals(hospitalId)) {
+            throw new NotFoundException("Appointment request not found");
+        }
+        return request;
     }
 
     private AppointmentRequestSummaryResponse toSummary(AppointmentRequest r) {

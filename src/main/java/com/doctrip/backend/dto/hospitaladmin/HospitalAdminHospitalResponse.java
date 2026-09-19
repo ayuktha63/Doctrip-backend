@@ -11,11 +11,12 @@ public record HospitalAdminHospitalResponse(
         String city,
         String state,
         String accreditation,
-        int beds) {
+        int beds,
+        boolean dataHidden) {
 
     public static HospitalAdminHospitalResponse from(Hospital h) {
         return new HospitalAdminHospitalResponse(
                 h.getId(), h.getHospitalCode(), h.getName(), h.getType(), h.getCity(), h.getState(),
-                h.getAccreditation(), h.getBeds());
+                h.getAccreditation(), h.getBeds(), h.isDataHidden());
     }
 }

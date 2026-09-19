@@ -17,5 +17,6 @@ public record HospitalResponse(
         String contactEmail,
         String contactPhone,
         boolean active,
+        boolean dataHidden,
         Instant createdAt,
         Instant updatedAt) {}

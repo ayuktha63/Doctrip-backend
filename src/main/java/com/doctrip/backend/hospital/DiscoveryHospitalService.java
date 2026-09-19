@@ -22,23 +22,23 @@ public class DiscoveryHospitalService {
     }
 
     public List<HospitalSummaryDto> getPubliclyDiscoverableHospitals() {
-        return hospitalRepository.findByApprovedTrue()
+        return hospitalRepository.findByApprovedTrueAndDataHiddenFalse()
                 .stream()
                 .map(HospitalSummaryDto::from)
                 .toList();
     }
 
     public List<HospitalSummaryDto> searchPubliclyDiscoverableHospitals(String name) {
-        return hospitalRepository.findByApprovedTrueAndNameContainingIgnoreCase(name)
+        return hospitalRepository.findByApprovedTrueAndDataHiddenFalseAndNameContainingIgnoreCase(name)
                 .stream()
                 .map(HospitalSummaryDto::from)
                 .toList();
     }
 
     public HospitalDetailDto getPubliclyDiscoverableHospitalById(Long id) {
-        DiscoveryHospital hospital = hospitalRepository.findByIdAndApprovedTrue(id)
+        DiscoveryHospital hospital = hospitalRepository.findByIdAndApprovedTrueAndDataHiddenFalse(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Hospital not found"));
-        List<Doctor> doctors = doctorRepository.findByApprovedTrueAndHospitalId(hospital.getId());
+        List<Doctor> doctors = doctorRepository.findPubliclyDiscoverableByHospitalId(hospital.getId());
         return HospitalDetailDto.from(hospital, doctors);
     }
 }
