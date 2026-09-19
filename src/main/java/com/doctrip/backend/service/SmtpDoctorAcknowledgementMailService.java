@@ -80,7 +80,7 @@ public class SmtpDoctorAcknowledgementMailService implements DoctorAcknowledgeme
                 </p>
                 <p>Can't make this exact time, but could do another? Reply to this email with exactly these two lines:</p>
                 <pre>Alternative Date: YYYY-MM-DD
-                Alternative Time: HH:MM</pre>
+                Alternative Time: HH:MM AM/PM (e.g. 02:00 PM)</pre>
                 <p>This request will expire if not answered by the deadline above.</p>
                 """
                 .formatted(
@@ -105,7 +105,13 @@ public class SmtpDoctorAcknowledgementMailService implements DoctorAcknowledgeme
             helper.setText(stripHtml(html), html);
             mailSender.send(message);
 
-            String messageId = message.getMessageID();
+            // JavaMail auto-generates the Message-ID from the sending host's local IP as an RFC
+            // 5322 domain-literal ("@[10.0.0.5]"), but Gmail strips the brackets when it builds
+            // the reply's In-Reply-To header ("@10.0.0.5") — DoctorReplyImapPoller's exact-string
+            // match against this stored value would then silently never hit. Normalizing away the
+            // brackets here (and doing the same on the read side) makes the match
+            // bracket-format-independent regardless of what generated the id.
+            String messageId = normalizeMessageId(message.getMessageID());
             ack.setEmailMessageId(messageId);
             doctorAcknowledgementRequestRepository.save(ack);
         } catch (Exception e) {
@@ -115,6 +121,10 @@ public class SmtpDoctorAcknowledgementMailService implements DoctorAcknowledgeme
             // codebase (ConsoleNotificationService's callers don't roll back on notify() either).
             log.error("Failed to send doctor acknowledgement email for ack {}", ack.getId(), e);
         }
+    }
+
+    static String normalizeMessageId(String messageId) {
+        return messageId == null ? null : messageId.replace("[", "").replace("]", "");
     }
 
     private String respondLink(java.util.UUID ackId, String action) {

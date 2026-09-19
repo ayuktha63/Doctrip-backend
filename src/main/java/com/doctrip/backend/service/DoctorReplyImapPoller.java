@@ -49,8 +49,12 @@ public class DoctorReplyImapPoller {
     // case-insensitively, tolerant of the doctor's own reply text sitting above quoted history.
     private static final Pattern DATE_PATTERN =
             Pattern.compile("Alternative Date:\\s*(\\d{4}-\\d{2}-\\d{2})", Pattern.CASE_INSENSITIVE);
-    private static final Pattern TIME_PATTERN =
-            Pattern.compile("Alternative Time:\\s*(\\d{1,2}:\\d{2})", Pattern.CASE_INSENSITIVE);
+    // The instructed format is "HH:MM AM/PM" (e.g. "02:00 PM"), but a bare 24-hour "14:00" is
+    // also accepted as a fallback — either way, the AM/PM suffix (if present) is captured
+    // separately so it's never silently dropped: a dropped "PM" would otherwise misparse "02:00
+    // PM" as 2:00 AM instead of being rejected or corrected.
+    static final Pattern TIME_PATTERN = Pattern.compile(
+            "Alternative Time:\\s*(\\d{1,2}):(\\d{2})\\s*(AM|PM)?", Pattern.CASE_INSENSITIVE);
 
     private final DoctorAcknowledgementRequestRepository doctorAcknowledgementRequestRepository;
     private final AppointmentRequestService appointmentRequestService;
@@ -90,12 +94,20 @@ public class DoctorReplyImapPoller {
         }
     }
 
+    // A single connect attempt on a flaky network can fail transiently even when the mailbox is
+    // reachable moments before/after — retrying within the same tick (rather than only on the
+    // next scheduled poll) meaningfully shortens how long a doctor's reply sits unprocessed.
+    private static final int CONNECT_ATTEMPTS = 3;
+    private static final long RETRY_DELAY_MS = 3000;
+
     private void checkInbox() throws Exception {
         Properties props = new Properties();
         props.put("mail.store.protocol", "imaps");
+        props.put("mail.imaps.connectiontimeout", "10000");
+        props.put("mail.imaps.timeout", "10000");
         Session session = Session.getInstance(props);
         try (Store store = session.getStore("imaps")) {
-            store.connect(imapHost, imapPort, username, password);
+            connectWithRetry(store);
             Folder inbox = store.getFolder("INBOX");
             try {
                 inbox.open(Folder.READ_WRITE);
@@ -117,6 +129,23 @@ public class DoctorReplyImapPoller {
         }
     }
 
+    private void connectWithRetry(Store store) throws Exception {
+        Exception lastFailure = null;
+        for (int attempt = 1; attempt <= CONNECT_ATTEMPTS; attempt++) {
+            try {
+                store.connect(imapHost, imapPort, username, password);
+                return;
+            } catch (Exception e) {
+                lastFailure = e;
+                log.warn("IMAP connect attempt {}/{} failed: {}", attempt, CONNECT_ATTEMPTS, e.getMessage());
+                if (attempt < CONNECT_ATTEMPTS) {
+                    Thread.sleep(RETRY_DELAY_MS);
+                }
+            }
+        }
+        throw lastFailure;
+    }
+
     private void handle(Message message) throws Exception {
         String inReplyTo = firstHeader(message, "In-Reply-To");
         if (inReplyTo == null) {
@@ -126,8 +155,8 @@ public class DoctorReplyImapPoller {
             return; // not a reply to anything — ignore (e.g. an unrelated inbox message)
         }
 
-        Optional<DoctorAcknowledgementRequest> ackOpt =
-                doctorAcknowledgementRequestRepository.findByEmailMessageId(inReplyTo.trim());
+        Optional<DoctorAcknowledgementRequest> ackOpt = doctorAcknowledgementRequestRepository.findByEmailMessageId(
+                SmtpDoctorAcknowledgementMailService.normalizeMessageId(inReplyTo.trim()));
         if (ackOpt.isEmpty()) {
             return; // not a reply to one of our acknowledgement emails
         }
@@ -148,7 +177,7 @@ public class DoctorReplyImapPoller {
 
         try {
             LocalDate date = LocalDate.parse(dateMatcher.group(1));
-            LocalTime time = LocalTime.parse(timeMatcher.group(1));
+            LocalTime time = parseTime(timeMatcher);
             appointmentRequestService.respondToAcknowledgement(
                     ack.getId(), new DoctorResponseRequest("PROPOSE_ALTERNATIVE", date, time));
         } catch (Exception e) {
@@ -163,6 +192,31 @@ public class DoctorReplyImapPoller {
                 "doctor_reply_unparseable",
                 "Dr. " + ack.getDoctorName() + " replied to an acknowledgement request but " + reason
                         + " Needs manual follow-up (acknowledgement " + ack.getId() + ").");
+    }
+
+    /** Converts the matched hour/minute/AM-PM groups to a 24-hour {@link LocalTime}. An hour of
+     *  13-23 with no AM/PM suffix is unambiguous (already 24-hour). An hour of 1-12 with no
+     *  suffix is genuinely ambiguous — rejected rather than guessed, so a doctor who forgets
+     *  "AM"/"PM" gets flagged for a resend instead of silently landing on the wrong half of the
+     *  day (the bug this replaced: a bare "02:00" used to always mean 2 AM). */
+    static LocalTime parseTime(Matcher timeMatcher) {
+        int hour = Integer.parseInt(timeMatcher.group(1));
+        int minute = Integer.parseInt(timeMatcher.group(2));
+        String meridiem = timeMatcher.group(3);
+
+        if (meridiem == null) {
+            if (hour >= 13 && hour <= 23) {
+                return LocalTime.of(hour, minute);
+            }
+            throw new IllegalArgumentException(
+                    "hour " + hour + " needs an AM/PM (or use 24-hour, e.g. 14:00 instead of 2:00)");
+        }
+        if (hour < 1 || hour > 12) {
+            throw new IllegalArgumentException("hour " + hour + " is not valid with AM/PM");
+        }
+        boolean pm = meridiem.equalsIgnoreCase("PM");
+        int hour24 = (hour == 12) ? (pm ? 12 : 0) : (pm ? hour + 12 : hour);
+        return LocalTime.of(hour24, minute);
     }
 
     private String firstHeader(Message message, String name) throws Exception {
