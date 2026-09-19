@@ -277,6 +277,11 @@ public class AppointmentRequestService {
         String time = LOG_TIME_FORMAT.format(log.getTimestamp());
         String doctor = log.getChannel();
         return switch (log.getEvent()) {
+            case "appointment_request_submitted" -> CoordinationLogEntryResponse.builder()
+                    .title("Request submitted")
+                    .time(time)
+                    .body("Your request was received and is waiting for the hospital to begin coordination.")
+                    .build();
             case "doctor_coordination_started" -> CoordinationLogEntryResponse.builder()
                     .title("Coordination started")
                     .time(time)
