@@ -60,6 +60,16 @@ public class DoctorAcknowledgementRequest {
     @Column(name = "proposed_time")
     private LocalTime proposedTime;
 
+    /**
+     * The outbound acknowledgement email's {@code Message-ID} header (Story 7) — used to correlate
+     * a doctor's typed-reply email back to this row via the reply's standard {@code In-Reply-To}/
+     * {@code References} header, rather than parsing subject-line text (fragile — many mail
+     * clients mangle subjects on reply). Nullable: rows created before this feature, or via any
+     * future non-email channel, won't have one.
+     */
+    @Column(name = "email_message_id")
+    private String emailMessageId;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 

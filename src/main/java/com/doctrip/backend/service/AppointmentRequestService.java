@@ -30,6 +30,8 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -59,7 +61,11 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class AppointmentRequestService {
 
-    private static final long DOCTOR_RESPONSE_WINDOW_SECONDS = 900; // 15 minutes — placeholder, not spec'd yet.
+    private static final Logger log = LoggerFactory.getLogger(AppointmentRequestService.class);
+
+    // Story 7's FR-09 requires a configured Doctor response window but never specifies a number —
+    // 2 hours, per explicit product direction, in the absence of a spec'd value.
+    private static final long DOCTOR_RESPONSE_WINDOW_SECONDS = 7200;
 
     private static final List<DoctorAcknowledgementStatus> OPEN_ACK_STATUSES =
             List.of(DoctorAcknowledgementStatus.PENDING, DoctorAcknowledgementStatus.ALTERNATIVE_PROPOSED);
@@ -81,6 +87,7 @@ public class AppointmentRequestService {
     private final AuditLogRepository auditLogRepository;
     private final AuditService auditService;
     private final NotificationService notificationService;
+    private final DoctorAcknowledgementMailService doctorAcknowledgementMailService;
     /** Self-injected (via a lazily-resolved proxy) so calls the class makes to its own {@code
      * REQUIRES_NEW} methods actually go through Spring's transactional proxy — a direct {@code
      * this.method()} call bypasses AOP entirely (the classic Spring self-invocation gap) and would
@@ -95,6 +102,7 @@ public class AppointmentRequestService {
             AuditLogRepository auditLogRepository,
             AuditService auditService,
             NotificationService notificationService,
+            DoctorAcknowledgementMailService doctorAcknowledgementMailService,
             @Lazy AppointmentRequestService self) {
         this.appointmentRequestRepository = appointmentRequestRepository;
         this.hospitalRepository = hospitalRepository;
@@ -103,6 +111,7 @@ public class AppointmentRequestService {
         this.auditLogRepository = auditLogRepository;
         this.auditService = auditService;
         this.notificationService = notificationService;
+        this.doctorAcknowledgementMailService = doctorAcknowledgementMailService;
         this.self = self;
     }
 
@@ -272,7 +281,7 @@ public class AppointmentRequestService {
         Instant now = Instant.now();
         Instant deadline = now.plusSeconds(DOCTOR_RESPONSE_WINDOW_SECONDS);
         for (CoordinationDoctor doctor : targets) {
-            doctorAcknowledgementRequestRepository.save(DoctorAcknowledgementRequest.builder()
+            DoctorAcknowledgementRequest ack = doctorAcknowledgementRequestRepository.save(DoctorAcknowledgementRequest.builder()
                     .appointmentRequestId(request.getId())
                     .doctorId(doctor.getId())
                     .doctorName(doctor.getName())
@@ -291,6 +300,9 @@ public class AppointmentRequestService {
                     "doctor_acknowledgement_request",
                     "New appointment request in " + request.getDepartment() + " for " + request.getRequestedDate()
                             + " at " + request.getRequestedTime() + ".");
+            // Story 7 — the doctor's real, only channel: an email with one-click Accept/Reject
+            // links and reply-to-propose-an-alternative instructions.
+            doctorAcknowledgementMailService.send(ack, request, doctor.getEmail());
         }
 
         request.setStatus(AppointmentRequestStatus.DOCTOR_COORDINATION);

@@ -17,12 +17,27 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class HospitalService {
 
+    /**
+     * No DocTrip platform-admin authentication exists yet (see CLAUDE.md's Story 3 section and
+     * the TODO on /api/admin/** in SecurityConfig) — there is no real actor identity to record.
+     * Used only until that story adds one; every row audited under this id is understood to mean
+     * "some caller of the still-unauthenticated /api/admin/hospitals/** API."
+     */
+    private static final UUID PLATFORM_ADMIN_ACTOR_ID = new UUID(0L, 0L);
+    private static final String ACTOR_TYPE_PLATFORM_ADMIN = "PLATFORM_ADMIN";
+    private static final String ENTITY_TYPE_HOSPITAL = "HOSPITAL";
+
     private final HospitalRepository hospitalRepository;
     private final DiscoveryHospitalRepository discoveryHospitalRepository;
+    private final HospitalAuditService hospitalAuditService;
 
-    public HospitalService(HospitalRepository hospitalRepository, DiscoveryHospitalRepository discoveryHospitalRepository) {
+    public HospitalService(
+            HospitalRepository hospitalRepository,
+            DiscoveryHospitalRepository discoveryHospitalRepository,
+            HospitalAuditService hospitalAuditService) {
         this.hospitalRepository = hospitalRepository;
         this.discoveryHospitalRepository = discoveryHospitalRepository;
+        this.hospitalAuditService = hospitalAuditService;
     }
 
     @Transactional
@@ -47,7 +62,9 @@ public class HospitalService {
 
         Hospital saved = hospitalRepository.save(hospital);
         syncDiscoveryHospital(saved);
-        return toResponse(saved);
+        HospitalResponse after = toResponse(saved);
+        audit(saved.getId(), "CREATE", null, after);
+        return after;
     }
 
     public HospitalResponse get(UUID id) {
@@ -69,6 +86,8 @@ public class HospitalService {
                     throw new ConflictException("A hospital with this name already exists in this city.");
                 });
 
+        HospitalResponse before = toResponse(hospital);
+
         hospital.setName(request.name().trim());
         hospital.setType(blankToDefault(request.type(), "Multi-speciality"));
         hospital.setCity(request.city().trim());
@@ -82,16 +101,28 @@ public class HospitalService {
 
         Hospital saved = hospitalRepository.save(hospital);
         syncDiscoveryHospital(saved);
-        return toResponse(saved);
+        HospitalResponse after = toResponse(saved);
+        audit(saved.getId(), "UPDATE", before, after);
+        return after;
     }
 
     @Transactional
     public HospitalResponse setActive(UUID id, boolean active) {
         Hospital hospital = findOrThrow(id);
+        HospitalResponse before = toResponse(hospital);
+
         hospital.setActive(active);
         Hospital saved = hospitalRepository.save(hospital);
         syncDiscoveryHospital(saved);
-        return toResponse(saved);
+        HospitalResponse after = toResponse(saved);
+        audit(saved.getId(), "STATUS_TOGGLE", before, after);
+        return after;
+    }
+
+    private void audit(UUID hospitalId, String action, Object previousValue, Object newValue) {
+        hospitalAuditService.record(
+                hospitalId, ACTOR_TYPE_PLATFORM_ADMIN, PLATFORM_ADMIN_ACTOR_ID, ENTITY_TYPE_HOSPITAL, hospitalId,
+                action, previousValue, newValue);
     }
 
     /**
