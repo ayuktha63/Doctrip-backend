@@ -858,6 +858,7 @@ public class AppointmentRequestService {
     private AppointmentRequestSummaryResponse toSummary(AppointmentRequest r) {
         boolean breached = Instant.now().isAfter(r.getAdminSlaDeadline());
         String hospitalName = hospitalRepository.findById(r.getHospitalId()).map(Hospital::getName).orElse(null);
+        DoctorAcknowledgementRequest secured = findSecuredAck(r.getId());
         return new AppointmentRequestSummaryResponse(
                 r.getId(),
                 r.getRequestCode(),
@@ -870,7 +871,20 @@ public class AppointmentRequestService {
                 r.getRequestedTime(),
                 r.getStatus(),
                 r.getAdminSlaDeadline(),
-                breached);
+                breached,
+                secured == null ? null : secured.getDoctorName(),
+                secured == null ? null : (secured.getProposedDate() != null ? secured.getProposedDate() : r.getRequestedDate()),
+                secured == null ? null : (secured.getProposedTime() != null ? secured.getProposedTime() : r.getRequestedTime()));
+    }
+
+    /** The doctor/slot actually secured for a request (ACCEPTED ack) — null before one exists. */
+    private DoctorAcknowledgementRequest findSecuredAck(UUID appointmentRequestId) {
+        return doctorAcknowledgementRequestRepository
+                .findByAppointmentRequestIdOrderBySentAtAsc(appointmentRequestId)
+                .stream()
+                .filter(a -> a.getStatus() == DoctorAcknowledgementStatus.ACCEPTED)
+                .findFirst()
+                .orElse(null);
     }
 
     private AppointmentRequestDetailResponse toDetail(AppointmentRequest r, String hospitalName) {
@@ -891,10 +905,7 @@ public class AppointmentRequestService {
                         a.getProposedTime()))
                 .toList();
 
-        DoctorAcknowledgementRequest secured = acks.stream()
-                .filter(a -> a.getStatus() == DoctorAcknowledgementStatus.ACCEPTED)
-                .findFirst()
-                .orElse(null);
+        DoctorAcknowledgementRequest secured = findSecuredAck(r.getId());
 
         return new AppointmentRequestDetailResponse(
                 r.getId(),
