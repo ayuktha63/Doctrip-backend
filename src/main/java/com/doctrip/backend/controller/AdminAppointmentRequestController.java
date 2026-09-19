@@ -4,6 +4,7 @@ import com.doctrip.backend.dto.AppointmentRequestDetailResponse;
 import com.doctrip.backend.dto.AppointmentRequestSummaryResponse;
 import com.doctrip.backend.dto.CoordinationLogEntryResponse;
 import com.doctrip.backend.dto.DoctorAvailabilityResponse;
+import com.doctrip.backend.dto.PendingAcknowledgementResponse;
 import com.doctrip.backend.service.AppointmentRequestService;
 import java.util.List;
 import java.util.UUID;
@@ -27,6 +28,12 @@ public class AdminAppointmentRequestController {
     @GetMapping
     public List<AppointmentRequestSummaryResponse> list(@RequestParam UUID hospitalId) {
         return appointmentRequestService.listForHospital(hospitalId);
+    }
+
+    /** "Doctor approvals" sidebar screen — see AppointmentRequestService.listPendingAcknowledgements. */
+    @GetMapping("/pending-acknowledgements")
+    public List<PendingAcknowledgementResponse> pendingAcknowledgements(@RequestParam UUID hospitalId) {
+        return appointmentRequestService.listPendingAcknowledgements(hospitalId);
     }
 
     @GetMapping("/{id}")

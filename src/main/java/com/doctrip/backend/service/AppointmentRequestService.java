@@ -8,6 +8,7 @@ import com.doctrip.backend.dto.DoctorAcknowledgementSummary;
 import com.doctrip.backend.dto.DoctorAvailabilityResponse;
 import com.doctrip.backend.dto.DoctorCandidateResponse;
 import com.doctrip.backend.dto.DoctorResponseRequest;
+import com.doctrip.backend.dto.PendingAcknowledgementResponse;
 import com.doctrip.backend.entity.AppointmentRequest;
 import com.doctrip.backend.entity.AppointmentRequestStatus;
 import com.doctrip.backend.entity.AuditLog;
@@ -129,6 +130,45 @@ public class AppointmentRequestService {
     public List<AppointmentRequestSummaryResponse> listForHospital(UUID hospitalId) {
         return appointmentRequestRepository.findByHospitalIdOrderByCreatedAtDesc(hospitalId).stream()
                 .map(this::toSummary)
+                .toList();
+    }
+
+    private static final List<DoctorAcknowledgementStatus> AWAITING_RESPONSE_STATUSES =
+            List.of(DoctorAcknowledgementStatus.PENDING, DoctorAcknowledgementStatus.ALTERNATIVE_PROPOSED);
+
+    /**
+     * "Doctor approvals" sidebar screen — every acknowledgement across this hospital's requests
+     * still waiting on a doctor's response (accept/reject/propose alternative), flattened across
+     * requests rather than scoped to one (unlike the per-request coordination list on
+     * AppointmentRequestDetailResponse). No Doctor login exists yet (see
+     * DoctorAcknowledgementController's doc comment) — this is where Hospital Admin records that
+     * response on a doctor's behalf.
+     */
+    public List<PendingAcknowledgementResponse> listPendingAcknowledgements(UUID hospitalId) {
+        List<AppointmentRequest> inProgress = appointmentRequestRepository
+                .findByHospitalIdOrderByCreatedAtDesc(hospitalId)
+                .stream()
+                .filter(r -> r.getStatus() == AppointmentRequestStatus.DOCTOR_COORDINATION)
+                .toList();
+
+        return inProgress.stream()
+                .flatMap(r -> doctorAcknowledgementRequestRepository
+                        .findByAppointmentRequestIdOrderBySentAtAsc(r.getId())
+                        .stream()
+                        .filter(a -> AWAITING_RESPONSE_STATUSES.contains(a.getStatus()))
+                        .map(a -> new PendingAcknowledgementResponse(
+                                a.getId(),
+                                r.getId(),
+                                r.getRequestCode(),
+                                r.getPatientName(),
+                                r.getDepartment(),
+                                a.getDoctorName(),
+                                a.getDoctorSpecialty(),
+                                a.getStatus().name(),
+                                a.getSentAt(),
+                                a.getResponseDeadline(),
+                                a.getProposedDate(),
+                                a.getProposedTime())))
                 .toList();
     }
 
