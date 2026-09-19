@@ -28,3 +28,19 @@ OAUTH2_FRONTEND_REDIRECT_URI: http://localhost:4200/auth/callback
 
 # Real OTP delivery (email/SMS) is not wired yet — this slice uses ConsoleOtpDeliveryService,
 # which prints the OTP to stdout.
+
+# Story 7 — Doctor Acknowledgement email. A single mailbox account is used for both sending
+# (SMTP) and receiving doctor replies (IMAP) — e.g. a Gmail account with an app password works
+# for both ports. MAIL_IMAP_HOST defaults to MAIL_HOST if not set separately.
+MAIL_HOST: smtp.gmail.com
+MAIL_SMTP_PORT: 587
+MAIL_IMAP_HOST: imap.gmail.com
+MAIL_IMAP_PORT: 993
+MAIL_USERNAME: your-mailbox@example.com
+MAIL_PASSWORD: your-app-password
+MAIL_FROM: no-reply@doctrip.example
+
+# Absolute base URL this backend is reachable at — used to build the Accept/Reject links embedded
+# in the doctor acknowledgement email (must be reachable by whoever clicks the email link, not
+# just localhost, once deployed).
+API_BASE_URL: http://localhost:8081

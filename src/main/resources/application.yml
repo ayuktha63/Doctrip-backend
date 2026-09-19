@@ -29,6 +29,18 @@ spring:
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:}
 
+  mail:
+    host: ${MAIL_HOST:localhost}
+    port: ${MAIL_SMTP_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+
   security:
     oauth2:
       client:
@@ -66,3 +78,8 @@ doctrip:
     length: 6
   oauth2:
     frontend-redirect-uri: ${OAUTH2_FRONTEND_REDIRECT_URI:http://localhost:4200/auth/callback}
+  mail:
+    from: ${MAIL_FROM:no-reply@doctrip.example}
+    imap-host: ${MAIL_IMAP_HOST:${MAIL_HOST:localhost}}
+    imap-port: ${MAIL_IMAP_PORT:993}
+    api-base-url: ${API_BASE_URL:http://localhost:8081}

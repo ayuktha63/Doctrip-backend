@@ -4,6 +4,7 @@ import com.doctrip.backend.entity.DoctorAcknowledgementRequest;
 import com.doctrip.backend.entity.DoctorAcknowledgementStatus;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
@@ -13,6 +14,10 @@ import org.springframework.data.repository.query.Param;
 public interface DoctorAcknowledgementRequestRepository extends JpaRepository<DoctorAcknowledgementRequest, UUID> {
 
     List<DoctorAcknowledgementRequest> findByAppointmentRequestIdOrderBySentAtAsc(UUID appointmentRequestId);
+
+    /** Story 7 — resolves an inbound reply back to its acknowledgement request via the outbound
+     *  email's Message-ID (matched against the reply's In-Reply-To/References header). */
+    Optional<DoctorAcknowledgementRequest> findByEmailMessageId(String emailMessageId);
 
     List<DoctorAcknowledgementRequest> findByAppointmentRequestIdAndStatus(
             UUID appointmentRequestId, DoctorAcknowledgementStatus status);
