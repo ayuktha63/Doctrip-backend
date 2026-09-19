@@ -47,6 +47,10 @@ public class CoordinationDoctor {
 
     private String specialty;
 
+    /** Story 7 — where the acknowledgement email actually gets sent. Nullable: rows created before
+     *  this feature won't have one, and coordination can't email a doctor without it. */
+    private String email;
+
     @Builder.Default
     @Column(nullable = false)
     private boolean available = true;
