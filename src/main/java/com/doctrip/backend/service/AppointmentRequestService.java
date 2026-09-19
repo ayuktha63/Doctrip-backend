@@ -2,12 +2,14 @@ package com.doctrip.backend.service;
 
 import com.doctrip.backend.dto.AppointmentRequestDetailResponse;
 import com.doctrip.backend.dto.AppointmentRequestSummaryResponse;
+import com.doctrip.backend.dto.CoordinationLogEntryResponse;
 import com.doctrip.backend.dto.DoctorAcknowledgementSummary;
 import com.doctrip.backend.dto.DoctorAvailabilityResponse;
 import com.doctrip.backend.dto.DoctorCandidateResponse;
 import com.doctrip.backend.dto.DoctorResponseRequest;
 import com.doctrip.backend.entity.AppointmentRequest;
 import com.doctrip.backend.entity.AppointmentRequestStatus;
+import com.doctrip.backend.entity.AuditLog;
 import com.doctrip.backend.entity.CoordinationDoctor;
 import com.doctrip.backend.entity.DoctorAcknowledgementRequest;
 import com.doctrip.backend.entity.DoctorAcknowledgementStatus;
@@ -17,12 +19,16 @@ import com.doctrip.backend.exception.ConflictException;
 import com.doctrip.backend.exception.ForbiddenException;
 import com.doctrip.backend.exception.NotFoundException;
 import com.doctrip.backend.repository.AppointmentRequestRepository;
+import com.doctrip.backend.repository.AuditLogRepository;
 import com.doctrip.backend.repository.DoctorAcknowledgementRequestRepository;
 import com.doctrip.backend.repository.CoordinationDoctorRepository;
 import com.doctrip.backend.repository.HospitalRepository;
 import java.time.Instant;
+import java.time.format.DateTimeFormatter;
+import java.time.ZoneId;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -78,6 +84,7 @@ public class AppointmentRequestService {
     private final HospitalRepository hospitalRepository;
     private final CoordinationDoctorRepository doctorRepository;
     private final DoctorAcknowledgementRequestRepository doctorAcknowledgementRequestRepository;
+    private final AuditLogRepository auditLogRepository;
     private final AuditService auditService;
     private final NotificationService notificationService;
     private final DoctorAcknowledgementMailService doctorAcknowledgementMailService;
@@ -92,6 +99,7 @@ public class AppointmentRequestService {
             HospitalRepository hospitalRepository,
             CoordinationDoctorRepository doctorRepository,
             DoctorAcknowledgementRequestRepository doctorAcknowledgementRequestRepository,
+            AuditLogRepository auditLogRepository,
             AuditService auditService,
             NotificationService notificationService,
             DoctorAcknowledgementMailService doctorAcknowledgementMailService,
@@ -100,6 +108,7 @@ public class AppointmentRequestService {
         this.hospitalRepository = hospitalRepository;
         this.doctorRepository = doctorRepository;
         this.doctorAcknowledgementRequestRepository = doctorAcknowledgementRequestRepository;
+        this.auditLogRepository = auditLogRepository;
         this.auditService = auditService;
         this.notificationService = notificationService;
         this.doctorAcknowledgementMailService = doctorAcknowledgementMailService;
@@ -119,9 +128,92 @@ public class AppointmentRequestService {
                 .findById(request.getHospitalId())
                 .orElseThrow(() -> new NotFoundException("Hospital not found"));
 
-        auditService.record(request.getPatientId(), "appointment_request_admin_reviewed", null);
+        auditService.record(request.getPatientId(), "appointment_request_admin_reviewed", null, request.getId());
 
         return toDetail(request, hospital.getName());
+    }
+
+    private static final DateTimeFormatter LOG_TIME_FORMAT =
+            DateTimeFormatter.ofPattern("d MMM, h:mm a").withZone(ZoneId.systemDefault());
+
+    /**
+     * "Coordination log" card (mockup's {@code cur.log}) — a human-readable timeline built from
+     * {@link AuditLog} rows this service already writes on every state change, filtered by this
+     * request's own id so a patient with several requests never sees another request's history
+     * mixed in.
+     */
+    public List<CoordinationLogEntryResponse> getLog(UUID id) {
+        findOrThrow(id);
+        return auditLogRepository.findByAppointmentRequestIdOrderByTimestampAsc(id).stream()
+                .map(this::toLogEntry)
+                .filter(java.util.Objects::nonNull)
+                .toList();
+    }
+
+    private CoordinationLogEntryResponse toLogEntry(AuditLog log) {
+        String time = LOG_TIME_FORMAT.format(log.getTimestamp());
+        String doctor = log.getChannel();
+        return switch (log.getEvent()) {
+            case "doctor_coordination_started" -> CoordinationLogEntryResponse.builder()
+                    .title("Coordination started")
+                    .time(time)
+                    .body(("SYSTEM".equals(doctor) ? "System took over after the Admin SLA lapsed" : "Hospital Admin started coordination")
+                            + " — request sent to every eligible doctor.")
+                    .build();
+            case "system_sla_takeover" -> CoordinationLogEntryResponse.builder()
+                    .title("Coordination taken over")
+                    .time(time)
+                    .body("No Admin response inside the SLA — the system took over coordination.")
+                    .build();
+            case "doctor_accepted" -> CoordinationLogEntryResponse.builder()
+                    .title("Doctor accepted")
+                    .time(time)
+                    .body(doctor + " accepted the request and secured the slot.")
+                    .build();
+            case "doctor_unavailable_at_accept" -> CoordinationLogEntryResponse.builder()
+                    .title("Acceptance reversed")
+                    .time(time)
+                    .body(doctor + " was no longer available — the acceptance could not be applied.")
+                    .build();
+            case "doctor_rejected" -> CoordinationLogEntryResponse.builder()
+                    .title("Doctor declined")
+                    .time(time)
+                    .body(doctor + " declined the request.")
+                    .build();
+            case "doctor_alt_proposed" -> CoordinationLogEntryResponse.builder()
+                    .title("Alternative proposed")
+                    .time(time)
+                    .body(doctor + " proposed a different date/time.")
+                    .build();
+            case "doctor_ack_expired" -> CoordinationLogEntryResponse.builder()
+                    .title("No response in time")
+                    .time(time)
+                    .body(doctor + " did not respond inside the response window.")
+                    .build();
+            case "alt_slot_selected" -> CoordinationLogEntryResponse.builder()
+                    .title("Proposal sent")
+                    .time(time)
+                    .body("Hospital Admin selected " + doctor + "'s proposed slot and sent it to the patient.")
+                    .build();
+            case "coordination_escalated" -> CoordinationLogEntryResponse.builder()
+                    .title("Escalated")
+                    .time(time)
+                    .body("NO_DOCTORS".equals(doctor)
+                            ? "No eligible doctors were available — escalated back to Hospital Admin."
+                            : "Every contacted doctor declined with no valid alternative — escalated back to Hospital Admin.")
+                    .build();
+            case "patient_confirmed" -> CoordinationLogEntryResponse.builder()
+                    .title("Patient confirmed")
+                    .time(time)
+                    .body("The patient confirmed the proposed appointment.")
+                    .build();
+            case "patient_cancelled" -> CoordinationLogEntryResponse.builder()
+                    .title("Cancelled by patient")
+                    .time(time)
+                    .body("The patient cancelled this request.")
+                    .build();
+            default -> null;
+        };
     }
 
     /** FR-02/FR-04/FR-05 — preview who's eligible before actually sending acknowledgement requests. */
@@ -200,7 +292,8 @@ public class AppointmentRequestService {
             auditService.record(
                     request.getPatientId(),
                     "doctor_acknowledgement_requested",
-                    requestedDoctor != null ? "REQUESTED" : "ALTERNATIVE");
+                    requestedDoctor != null ? "REQUESTED" : "ALTERNATIVE",
+                    request.getId());
             notificationService.notify(
                     "DOCTOR",
                     doctor.getId().toString(),
@@ -214,7 +307,7 @@ public class AppointmentRequestService {
 
         request.setStatus(AppointmentRequestStatus.DOCTOR_COORDINATION);
         appointmentRequestRepository.save(request);
-        auditService.record(request.getPatientId(), "doctor_coordination_started", initiator);
+        auditService.record(request.getPatientId(), "doctor_coordination_started", initiator, request.getId());
     }
 
     /**
@@ -234,7 +327,7 @@ public class AppointmentRequestService {
             return; // Defensive — the caller's query should already filter this, but don't trust it twice-removed.
         }
 
-        auditService.record(request.getPatientId(), "system_sla_takeover", null);
+        auditService.record(request.getPatientId(), "system_sla_takeover", null, request.getId());
         notificationService.notify(
                 "ADMIN", request.getHospitalId().toString(), "system_sla_takeover",
                 "Admin SLA breached for " + request.getRequestCode() + " — the System has taken over coordination.");
@@ -247,7 +340,7 @@ public class AppointmentRequestService {
                             AppointmentRequestStatus.ESCALATED,
                             Instant.now())
                     == 1) {
-                auditService.record(request.getPatientId(), "coordination_escalated", "NO_DOCTORS");
+                auditService.record(request.getPatientId(), "coordination_escalated", "NO_DOCTORS", request.getId());
                 notifyEscalation(request);
             }
         }
@@ -297,7 +390,7 @@ public class AppointmentRequestService {
 
         doctorAcknowledgementRequestRepository.closeAllOpen(
                 id, CANCELLABLE_ACK_STATUSES, DoctorAcknowledgementStatus.CLOSED, now);
-        auditService.record(patientId, "patient_cancelled", null);
+        auditService.record(patientId, "patient_cancelled", null, id);
 
         notificationService.notify(
                 "ADMIN", request.getHospitalId().toString(), "patient_cancelled",
@@ -341,7 +434,7 @@ public class AppointmentRequestService {
                     });
         }
 
-        auditService.record(patientId, "patient_confirmed", null);
+        auditService.record(patientId, "patient_confirmed", null, id);
 
         // FR-09/Notifications table — "Patient accepts alternative" notifies Doctor + Hospital
         // Admin; applied here for any confirmation, not just an alternative-slot one, since both
@@ -430,7 +523,7 @@ public class AppointmentRequestService {
 
         doctorAcknowledgementRequestRepository.closeOthers(
                 request.getId(), ack.getId(), OPEN_ACK_STATUSES, DoctorAcknowledgementStatus.CLOSED, now);
-        auditService.record(request.getPatientId(), "doctor_accepted", ack.getDoctorName());
+        auditService.record(request.getPatientId(), "doctor_accepted", ack.getDoctorName(), request.getId());
         notificationService.notify(
                 "PATIENT",
                 request.getPatientId(),
@@ -454,7 +547,7 @@ public class AppointmentRequestService {
         }
         AppointmentRequest request = appointmentRequestRepository.findById(ack.getAppointmentRequestId()).orElse(null);
         if (request == null) return;
-        auditService.record(request.getPatientId(), "doctor_unavailable_at_accept", ack.getDoctorName());
+        auditService.record(request.getPatientId(), "doctor_unavailable_at_accept", ack.getDoctorName(), request.getId());
         escalateIfExhausted(request);
     }
 
@@ -475,7 +568,7 @@ public class AppointmentRequestService {
                 == 0) {
             throw new ConflictException("This acknowledgement request is no longer active.");
         }
-        auditService.record(request.getPatientId(), "doctor_rejected", ack.getDoctorName());
+        auditService.record(request.getPatientId(), "doctor_rejected", ack.getDoctorName(), request.getId());
         escalateIfExhausted(request);
     }
 
@@ -499,7 +592,7 @@ public class AppointmentRequestService {
         }
         // BR-21 — the Patient is notified once a valid alternative is actually selected
         // (resolveAlternative), not on every individual raw proposal from each doctor.
-        auditService.record(request.getPatientId(), "doctor_alt_proposed", ack.getDoctorName());
+        auditService.record(request.getPatientId(), "doctor_alt_proposed", ack.getDoctorName(), request.getId());
     }
 
     /**
@@ -527,7 +620,7 @@ public class AppointmentRequestService {
                 if (doctorAcknowledgementRequestRepository.compareAndSetStatus(
                                 ack.getId(), DoctorAcknowledgementStatus.PENDING, DoctorAcknowledgementStatus.CLOSED, now)
                         == 1) {
-                    auditService.record(request.getPatientId(), "doctor_ack_expired", ack.getDoctorName());
+                    auditService.record(request.getPatientId(), "doctor_ack_expired", ack.getDoctorName(), request.getId());
                 }
             }
             escalateIfExhausted(request);
@@ -545,7 +638,7 @@ public class AppointmentRequestService {
                                 AppointmentRequestStatus.ESCALATED,
                                 Instant.now())
                         == 1) {
-            auditService.record(request.getPatientId(), "coordination_escalated", null);
+            auditService.record(request.getPatientId(), "coordination_escalated", null, request.getId());
             notifyEscalation(request);
         }
     }
@@ -613,7 +706,7 @@ public class AppointmentRequestService {
         doctorAcknowledgementRequestRepository.closeOthers(
                 requestId, earliest.getId(), OPEN_ACK_STATUSES, DoctorAcknowledgementStatus.CLOSED, now);
 
-        auditService.record(request.getPatientId(), "alt_slot_selected", earliest.getDoctorName());
+        auditService.record(request.getPatientId(), "alt_slot_selected", earliest.getDoctorName(), request.getId());
         notificationService.notify(
                 "PATIENT",
                 request.getPatientId(),

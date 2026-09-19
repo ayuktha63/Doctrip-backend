@@ -60,5 +60,8 @@ databaseChangeLog:
       file: db/changelog/changes/015-treatment-package-consultation-fee.sql
       relativeToChangelogFile: false
   - include:
+      file: db/changelog/changes/016-audit-log-appointment-request-id.sql
+      relativeToChangelogFile: false
+  - include:
       file: db/changelog/changes/016-doctor-acknowledgement-email-message-id.sql
       relativeToChangelogFile: false
