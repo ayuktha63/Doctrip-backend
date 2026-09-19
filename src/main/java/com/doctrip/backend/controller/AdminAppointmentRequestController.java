@@ -2,6 +2,7 @@ package com.doctrip.backend.controller;
 
 import com.doctrip.backend.dto.AppointmentRequestDetailResponse;
 import com.doctrip.backend.dto.AppointmentRequestSummaryResponse;
+import com.doctrip.backend.dto.CoordinationLogEntryResponse;
 import com.doctrip.backend.dto.DoctorAvailabilityResponse;
 import com.doctrip.backend.service.AppointmentRequestService;
 import java.util.List;
@@ -36,6 +37,11 @@ public class AdminAppointmentRequestController {
     @GetMapping("/{id}/doctor-availability")
     public DoctorAvailabilityResponse doctorAvailability(@PathVariable UUID id) {
         return appointmentRequestService.getDoctorAvailability(id);
+    }
+
+    @GetMapping("/{id}/log")
+    public List<CoordinationLogEntryResponse> log(@PathVariable UUID id) {
+        return appointmentRequestService.getLog(id);
     }
 
     @PostMapping("/{id}/coordination/start")

@@ -680,4 +680,67 @@ class AppointmentCoordinationTests {
         assertThat(notificationService.hasEventFor("ADMIN", h.getId().toString(), "patient_cancelled")).isTrue();
         assertThat(notificationService.hasEventFor("DOCTOR", d.getId().toString(), "patient_cancelled")).isTrue();
     }
+
+    // ── Coordination log ────────────────────────────────────────────────────────────────────
+
+    @Test
+    void coordinationLogNarratesStartAndAcceptanceInOrder() throws Exception {
+        AuthedPatient patient = registerAndVerifyPatient("log1@example.com");
+        Hospital h = hospital();
+        CoordinationDoctor d = doctor(h.getId(), "Cardiology", true);
+        AppointmentRequest r = requestFor(patient.patientId(), h.getId(), "Cardiology", d.getName());
+
+        mockMvc.perform(post("/api/admin/appointment-requests/" + r.getId() + "/coordination/start"))
+                .andExpect(status().isOk());
+        UUID ackId = acksFor(r.getId()).get(0).getId();
+        mockMvc.perform(post("/api/doctor/acknowledgements/" + ackId + "/respond")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new DoctorResponseRequest("ACCEPT", null, null))))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/admin/appointment-requests/" + r.getId() + "/log"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[0].title").value("Coordination started"))
+                .andExpect(jsonPath("$[1].title").value("Doctor accepted"))
+                .andExpect(jsonPath("$[1].body", org.hamcrest.Matchers.containsString(d.getName())));
+    }
+
+    @Test
+    void coordinationLogDoesNotMixInAnotherRequestFromTheSamePatient() throws Exception {
+        AuthedPatient patient = registerAndVerifyPatient("log2@example.com");
+        Hospital h = hospital();
+        CoordinationDoctor d1 = doctor(h.getId(), "Cardiology", true);
+        CoordinationDoctor d2 = doctor(h.getId(), "Neurology", true);
+        AppointmentRequest r1 = requestFor(patient.patientId(), h.getId(), "Cardiology", d1.getName());
+        AppointmentRequest r2 = requestFor(patient.patientId(), h.getId(), "Neurology", d2.getName());
+
+        mockMvc.perform(post("/api/admin/appointment-requests/" + r1.getId() + "/coordination/start"))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/admin/appointment-requests/" + r2.getId() + "/coordination/start"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/admin/appointment-requests/" + r1.getId() + "/log"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].title").value("Coordination started"));
+        mockMvc.perform(get("/api/admin/appointment-requests/" + r2.getId() + "/log"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].title").value("Coordination started"));
+
+        UUID ack1 = acksFor(r1.getId()).get(0).getId();
+        mockMvc.perform(post("/api/doctor/acknowledgements/" + ack1 + "/respond")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(new DoctorResponseRequest("ACCEPT", null, null))))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/admin/appointment-requests/" + r1.getId() + "/log"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(2))
+                .andExpect(jsonPath("$[1].body", org.hamcrest.Matchers.containsString(d1.getName())));
+        mockMvc.perform(get("/api/admin/appointment-requests/" + r2.getId() + "/log"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1));
+    }
 }
