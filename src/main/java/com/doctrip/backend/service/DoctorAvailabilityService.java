@@ -4,6 +4,7 @@ import com.doctrip.backend.dto.hospitaladmin.AvailabilityRequest;
 import com.doctrip.backend.dto.hospitaladmin.AvailabilityResponse;
 import com.doctrip.backend.entity.DoctorAvailability;
 import com.doctrip.backend.entity.HospitalDoctor;
+import com.doctrip.backend.exception.BadRequestException;
 import com.doctrip.backend.exception.ConflictException;
 import com.doctrip.backend.exception.NotFoundException;
 import com.doctrip.backend.repository.DoctorAvailabilityRepository;
@@ -47,6 +48,13 @@ public class DoctorAvailabilityService {
     @Transactional
     public AvailabilityResponse create(UUID hospitalId, UUID actorId, UUID doctorId, AvailabilityRequest request) {
         findDoctorScoped(hospitalId, doctorId);
+
+        // The DB enforces end_time > start_time via ck_doctor_availability_time_order — checking it
+        // here too turns a bad request into a clean 400 instead of an opaque 500 from the
+        // uncaught DataIntegrityViolationException the constraint would otherwise throw.
+        if (!request.endTime().isAfter(request.startTime())) {
+            throw new BadRequestException("End time must be after start time.");
+        }
 
         List<DoctorAvailability> existingOnDate =
                 doctorAvailabilityRepository.findByDoctorIdAndSlotDate(doctorId, request.slotDate());
