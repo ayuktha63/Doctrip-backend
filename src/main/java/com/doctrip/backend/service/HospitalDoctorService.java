@@ -4,12 +4,14 @@ import com.doctrip.backend.doctor.Doctor;
 import com.doctrip.backend.doctor.DoctorRepository;
 import com.doctrip.backend.dto.hospitaladmin.DoctorRequest;
 import com.doctrip.backend.dto.hospitaladmin.DoctorResponse;
+import com.doctrip.backend.entity.CoordinationDoctor;
 import com.doctrip.backend.entity.Department;
 import com.doctrip.backend.entity.HospitalDoctor;
 import com.doctrip.backend.exception.ConflictException;
 import com.doctrip.backend.exception.NotFoundException;
 import com.doctrip.backend.hospital.DiscoveryHospital;
 import com.doctrip.backend.hospital.DiscoveryHospitalRepository;
+import com.doctrip.backend.repository.CoordinationDoctorRepository;
 import com.doctrip.backend.repository.DepartmentRepository;
 import com.doctrip.backend.repository.HospitalDoctorRepository;
 import java.util.List;
@@ -26,18 +28,21 @@ public class HospitalDoctorService {
     private final HospitalAuditService hospitalAuditService;
     private final DiscoveryHospitalRepository discoveryHospitalRepository;
     private final DoctorRepository discoveryDoctorRepository;
+    private final CoordinationDoctorRepository coordinationDoctorRepository;
 
     public HospitalDoctorService(
             HospitalDoctorRepository hospitalDoctorRepository,
             DepartmentRepository departmentRepository,
             HospitalAuditService hospitalAuditService,
             DiscoveryHospitalRepository discoveryHospitalRepository,
-            DoctorRepository discoveryDoctorRepository) {
+            DoctorRepository discoveryDoctorRepository,
+            CoordinationDoctorRepository coordinationDoctorRepository) {
         this.hospitalDoctorRepository = hospitalDoctorRepository;
         this.departmentRepository = departmentRepository;
         this.hospitalAuditService = hospitalAuditService;
         this.discoveryHospitalRepository = discoveryHospitalRepository;
         this.discoveryDoctorRepository = discoveryDoctorRepository;
+        this.coordinationDoctorRepository = coordinationDoctorRepository;
     }
 
     public List<DoctorResponse> list(UUID hospitalId) {
@@ -62,9 +67,11 @@ public class HospitalDoctorService {
                 .name(request.name().trim())
                 .specialty(request.specialty())
                 .experienceYears(request.experienceYears())
+                .email(request.email())
                 .build();
         doctor = hospitalDoctorRepository.save(doctor);
         syncDiscoveryDoctor(hospitalId, doctor, department.getName());
+        syncCoordinationDoctor(hospitalId, doctor, department.getName());
 
         DoctorResponse after = DoctorResponse.from(doctor, department.getName());
         hospitalAuditService.record(hospitalId, actorId, "DOCTOR", doctor.getId(), "CREATE", null, after);
@@ -90,8 +97,10 @@ public class HospitalDoctorService {
         doctor.setDepartmentId(request.departmentId());
         doctor.setSpecialty(request.specialty());
         doctor.setExperienceYears(request.experienceYears());
+        doctor.setEmail(request.email());
         doctor = hospitalDoctorRepository.save(doctor);
         syncDiscoveryDoctor(hospitalId, doctor, department.getName());
+        syncCoordinationDoctor(hospitalId, doctor, department.getName());
 
         DoctorResponse after = DoctorResponse.from(doctor, department.getName());
         hospitalAuditService.record(hospitalId, actorId, "DOCTOR", id, "UPDATE", before, after);
@@ -110,6 +119,7 @@ public class HospitalDoctorService {
         doctor.setActive(active);
         doctor = hospitalDoctorRepository.save(doctor);
         syncDiscoveryDoctor(hospitalId, doctor, departmentName);
+        syncCoordinationDoctor(hospitalId, doctor, departmentName);
 
         DoctorResponse after = DoctorResponse.from(doctor, departmentName);
         hospitalAuditService.record(hospitalId, actorId, "DOCTOR", id, "STATUS_TOGGLE", before, after);
@@ -142,6 +152,32 @@ public class HospitalDoctorService {
         discoveryDoctor.setExperienceYears(doctor.getExperienceYears());
         discoveryDoctor.setApproved(doctor.isActive());
         discoveryDoctorRepository.save(discoveryDoctor);
+    }
+
+    /**
+     * Keeps Story 6/7's coordination-eligibility side (`coordination_doctor` /
+     * CoordinationDoctor, what AppointmentRequestService.getDoctorAvailability actually checks
+     * before "Start coordination" is enabled) in sync with this admin console's doctor records.
+     * Without this, a real doctor added via Hospital Admin was never eligible for any request —
+     * eligibleDoctors was always empty and the button stayed disabled, regardless of hospital,
+     * department, or how many real doctors existed. `available` mirrors `active`.
+     */
+    private void syncCoordinationDoctor(UUID hospitalId, HospitalDoctor doctor, String departmentName) {
+        CoordinationDoctor coordinationDoctor = coordinationDoctorRepository
+                .findByHospitalDoctorId(doctor.getId())
+                .orElseGet(() -> {
+                    CoordinationDoctor fresh = new CoordinationDoctor();
+                    fresh.setId(UUID.randomUUID());
+                    return fresh;
+                });
+        coordinationDoctor.setHospitalDoctorId(doctor.getId());
+        coordinationDoctor.setHospitalId(hospitalId);
+        coordinationDoctor.setName(doctor.getName());
+        coordinationDoctor.setDepartment(departmentName);
+        coordinationDoctor.setSpecialty(doctor.getSpecialty());
+        coordinationDoctor.setEmail(doctor.getEmail());
+        coordinationDoctor.setAvailable(doctor.isActive());
+        coordinationDoctorRepository.save(coordinationDoctor);
     }
 
     private HospitalDoctor findScoped(UUID hospitalId, UUID id) {

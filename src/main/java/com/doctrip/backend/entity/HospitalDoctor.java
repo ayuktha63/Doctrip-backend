@@ -37,6 +37,9 @@ public class HospitalDoctor {
 
     private String specialty;
 
+    /** Where Story 7's coordination acknowledgement email actually gets sent — see CoordinationDoctor. */
+    private String email;
+
     @Column(name = "experience_years")
     private Integer experienceYears;
 
